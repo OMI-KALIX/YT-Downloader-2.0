@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube Downloader Pro</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <div class="logo">
+      <svg viewBox="0 0 24 24">
+        <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+      </svg>
+      <span>YT Downloader</span>
+    </div>
+    <div class="settings-icon" id="toggle-settings" title="Settings">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Backend Health Status Banner -->
+    <div id="backend-status-banner" class="backend-banner hidden">
+      <div class="banner-spinner"></div>
+      <span id="backend-status-text">Waking up cloud backend (Render spin-up)... Please wait</span>
+    </div>
+
+    <!-- Main Downloader View -->
+    <div id="main-view">
+      <div class="card" id="video-card">
+        <div class="video-info">
+          <img id="thumb" class="thumbnail" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='56'%3E%3Crect width='100' height='56' fill='%2327272a'/%3E%3C/svg%3E" alt="Thumbnail">
+          <div class="video-details">
+            <div id="title" class="video-title">Detecting YouTube video...</div>
+            <div id="uploader" class="video-uploader">--</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="quality-select">Select Quality / Format</label>
+        <select id="quality-select">
+          <option value="bestvideo+bestaudio/best">Best Available (HD/4K)</option>
+          <option value="bestaudio/best">Audio Only (MP3)</option>
+        </select>
+      </div>
+
+      <button id="download-btn" class="btn-primary">
+        <span>Download Now</span>
+      </button>
+
+      <div id="progress-section" class="progress-section">
+        <div class="progress-header">
+          <span id="progress-status">Downloading...</span>
+          <span id="progress-percent">0%</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div id="progress-fill" class="progress-bar-fill"></div>
+        </div>
+        <div class="progress-meta">
+          <span id="progress-speed">0 MB/s</span>
+          <span id="progress-eta">ETA: --</span>
+        </div>
+      </div>
+
+      <div id="status-error" class="status-message hidden"></div>
+    </div>
+
+    <!-- Settings View -->
+    <div id="settings-view" class="hidden">
+      <div class="form-group">
+        <label for="backend-url">Backend Server URL</label>
+        <input type="text" id="backend-url" value="http://localhost:8000" placeholder="https://your-backend.onrender.com">
+      </div>
+      <button id="save-settings-btn" class="btn-primary">
+        <span>Save Settings</span>
+      </button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
