@@ -44,8 +44,20 @@
       <div class="form-group">
         <label for="quality-select">Select Quality / Format</label>
         <select id="quality-select">
-          <option value="bestvideo+bestaudio/best">Best Available (HD/4K)</option>
-          <option value="bestaudio/best">Audio Only (MP3)</option>
+          <optgroup label="🎬 Video Quality">
+            <option value="bestvideo+bestaudio/best">🔥 Best Available (4K / HD)</option>
+            <option value="bestvideo[height<=1080]+bestaudio/best">Full HD (1080p)</option>
+            <option value="bestvideo[height<=720]+bestaudio/best">HD (720p)</option>
+            <option value="bestvideo[height<=480]+bestaudio/best">480p SD</option>
+            <option value="bestvideo[height<=360]+bestaudio/best">360p SD</option>
+            <option value="bestvideo[height<=240]+bestaudio/best">240p</option>
+            <option value="bestvideo[height<=144]+bestaudio/best">144p</option>
+          </optgroup>
+          <optgroup label="🎵 Audio Quality (MP3)">
+            <option value="audio_320k">320 kbps (High Quality MP3)</option>
+            <option value="audio_192k">192 kbps (Medium Quality MP3)</option>
+            <option value="audio_128k">128 kbps (Standard Quality MP3)</option>
+          </optgroup>
         </select>
       </div>
 

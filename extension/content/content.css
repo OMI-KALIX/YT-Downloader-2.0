@@ -38,7 +38,9 @@
   border: 1px solid #333333;
   border-radius: 12px;
   padding: 8px 0;
-  min-width: 200px;
+  min-width: 220px;
+  max-height: 380px;
+  overflow-y: auto;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.8);
   z-index: 10000;
   display: none;
@@ -46,6 +48,15 @@
 
 .yt-downloader-menu.show {
   display: block;
+}
+
+.yt-downloader-menu-header {
+  padding: 6px 16px 4px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #aaaaaa;
+  letter-spacing: 0.5px;
 }
 
 .yt-downloader-menu-item {

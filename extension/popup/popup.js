@@ -100,12 +100,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
           if (data.formats && data.formats.length > 0) {
             qualitySelect.innerHTML = "";
+
+            const videoGroup = document.createElement("optgroup");
+            videoGroup.label = "🎬 Video Quality";
+
+            const audioGroup = document.createElement("optgroup");
+            audioGroup.label = "🎵 Audio Quality (MP3)";
+
             data.formats.forEach((fmt) => {
               const opt = document.createElement("option");
               opt.value = fmt.format_id;
-              opt.textContent = `${fmt.resolution} (${fmt.type})`;
-              qualitySelect.appendChild(opt);
+              opt.textContent = fmt.resolution;
+
+              if (fmt.type === "audio" || fmt.format_id.includes("audio")) {
+                audioGroup.appendChild(opt);
+              } else {
+                videoGroup.appendChild(opt);
+              }
             });
+
+            if (videoGroup.children.length > 0) qualitySelect.appendChild(videoGroup);
+            if (audioGroup.children.length > 0) qualitySelect.appendChild(audioGroup);
           }
         }
       }
