@@ -16,6 +16,11 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
+        "noplaylist": True,
+        "extractor_args": {
+            "youtube": {"skip": ["authcheck"]},
+            "youtubetab": {"skip": ["authcheck"]}
+        }
     }
     if cookie_path and os.path.exists(cookie_path):
         ydl_opts["cookiefile"] = cookie_path
@@ -112,6 +117,11 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
         "progress_hooks": [progress_hook],
         "quiet": True,
         "no_warnings": True,
+        "noplaylist": True,
+        "extractor_args": {
+            "youtube": {"skip": ["authcheck"]},
+            "youtubetab": {"skip": ["authcheck"]}
+        },
         
         # Resume download & retry optimizations
         "continuedl": True,
