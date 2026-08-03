@@ -1,7 +1,7 @@
 import { convertToNetscapeCookies } from '../utils/cookie_exporter.js';
 
 // Default backend URL (configurable via storage)
-let BACKEND_URL = "http://localhost:8000";
+let BACKEND_URL = "https://youtube-downloader-extension-bul7.onrender.com";
 
 // Load custom backend URL if set
 chrome.storage.local.get(["backendUrl"], (res) => {
