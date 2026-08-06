@@ -21,6 +21,9 @@ WORKDIR /app
 COPY backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir -U yt-dlp
 
+# Pre-fetch EJS challenge solver component at container build time
+RUN yt-dlp --remote-components ejs:github --version || true
+
 # Copy backend source code
 COPY backend /app/backend
 

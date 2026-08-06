@@ -220,3 +220,14 @@ def test_mux_endpoint_and_cdn_expired_error():
     # Test CDNUrlExpiredError message formatting
     err = CDNUrlExpiredError("HTTP 403 link expired for video")
     assert "HTTP 403" in str(err)
+
+def test_ejs_remote_components_config():
+    import yt_dlp
+    opts = {
+        "quiet": True,
+        "js_runtimes": {"deno": {}, "node": {}},
+        "remote_components": ["ejs:github", "ejs:npm"]
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        assert "remote_components" in opts
+        assert "ejs:github" in opts["remote_components"]

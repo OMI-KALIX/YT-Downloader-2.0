@@ -126,6 +126,7 @@ def log_format_diagnostics(url: str, cookie_path: Optional[str] = None) -> None:
             "quiet": True,
             "no_warnings": True,
             "js_runtimes": {"deno": {}, "node": {}},
+            "remote_components": ["ejs:github", "ejs:npm"],
         }
         if cookie_path and os.path.exists(cookie_path):
             diag_opts["cookiefile"] = cookie_path
@@ -259,6 +260,7 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
         "extract_flat": False,
         "noplaylist": True,
         "js_runtimes": {"deno": {}, "node": {}},
+        "remote_components": ["ejs:github", "ejs:npm"],
     }
     base_opts.update(get_env_ydl_opts())
 
@@ -528,6 +530,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
         "noplaylist": True,
         "socket_timeout": 20,
         "js_runtimes": {"deno": {}, "node": {}},
+        "remote_components": ["ejs:github", "ejs:npm"],
         "format_sort": ["res", "fps", "codec", "size", "br"],
         
         # Resume download & retry optimizations
