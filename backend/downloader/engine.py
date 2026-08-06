@@ -251,8 +251,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
         })
     else:
         target_fmt = format_id if format_id else "bestvideo+bestaudio/best"
-        if not target_fmt.endswith("/best"):
-            target_fmt += "/bestvideo+bestaudio/best/18"
+        target_fmt = f"{target_fmt}/bestvideo+bestaudio/best/18/b/ba"
         ydl_opts.update({
             "format": target_fmt,
             "merge_output_format": "mp4",
@@ -298,7 +297,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
         if "Requested format is not available" in str(e):
             logger.warning(f"Requested format '{format_id}' unavailable for job {job_id}. Attempting resilient fallback download...")
             fallback_opts = dict(ydl_opts)
-            fallback_opts["format"] = "bestaudio/best/ba/b/140/251/18" if is_audio else "bestvideo+bestaudio/best/18"
+            fallback_opts["format"] = "bestaudio/best/ba/b/140/251/18" if is_audio else "bestvideo+bestaudio/best/18/b/ba"
             with yt_dlp.YoutubeDL(fallback_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 return resolve_downloaded_file(info)
