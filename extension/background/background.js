@@ -1,27 +1,32 @@
 import { convertToNetscapeCookies } from '../utils/cookie_exporter.js';
 
-// Default backend URL (configurable via storage)
+// Default backend URL & API key (configurable via storage)
 let BACKEND_URL = "https://youtube-downloader-extension-bul7.onrender.com";
+let API_KEY = "";
 
-// Load custom backend URL if set
-chrome.storage.local.get(["backendUrl"], (res) => {
-  if (res.backendUrl) {
-    BACKEND_URL = res.backendUrl.replace(/\/$/, "");
-  }
+// Load custom storage settings
+chrome.storage.local.get(["backendUrl", "apiKey"], (res) => {
+  if (res.backendUrl) BACKEND_URL = res.backendUrl.replace(/\/$/, "");
+  if (res.apiKey) API_KEY = res.apiKey;
 });
 
 chrome.storage.onChanged.addListener((changes) => {
-  if (changes.backendUrl) {
-    BACKEND_URL = changes.backendUrl.newValue.replace(/\/$/, "");
-  }
+  if (changes.backendUrl) BACKEND_URL = changes.backendUrl.newValue.replace(/\/$/, "");
+  if (changes.apiKey) API_KEY = changes.apiKey.newValue || "";
 });
+
+async function getAuthHeaders() {
+  const headers = { "Content-Type": "application/json" };
+  if (API_KEY) headers["x-api-key"] = API_KEY;
+  return headers;
+}
 
 // Extract cookies for YouTube domain
 async function getYouTubeNetscapeCookies() {
   return new Promise((resolve) => {
     chrome.cookies.getAll({ domain: ".youtube.com" }, (cookies) => {
       if (chrome.runtime.lastError || !cookies) {
-        logger.error("Failed to get cookies:", chrome.runtime.lastError);
+        console.error("Failed to get cookies:", chrome.runtime.lastError);
         resolve("");
         return;
       }
@@ -68,7 +73,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return;
       }
       
-      // If offline/sleeping, poll up to 30 times (60s)
       let attempts = 0;
       const maxAttempts = 30;
       const interval = setInterval(async () => {
@@ -92,19 +96,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === "GET_COOKIES") {
     getYouTubeNetscapeCookies().then(cookies => sendResponse({ cookies }));
-    return true; // Keep channel open for async response
+    return true;
   }
 
   if (request.action === "FETCH_FORMATS") {
     (async () => {
       try {
         const cookies = await getYouTubeNetscapeCookies();
+        const headers = await getAuthHeaders();
         const res = await fetch(`${BACKEND_URL}/api/formats`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({ url: request.url, cookies })
         });
         const data = await res.json();
+        if (!res.ok) {
+          sendResponse({ success: false, error: data.detail || "Error fetching formats" });
+          return;
+        }
         sendResponse({ success: true, data: data.data });
       } catch (err) {
         sendResponse({ success: false, error: err.message });
@@ -113,27 +122,49 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === "START_DOWNLOAD") {
+  if (request.action === "START_DOWNLOAD" || request.action === "START_BATCH_DOWNLOAD") {
     (async () => {
       try {
         const cookies = await getYouTubeNetscapeCookies();
-        const res = await fetch(`${BACKEND_URL}/api/download`, {
+        const headers = await getAuthHeaders();
+        const endpoint = request.action === "START_BATCH_DOWNLOAD" ? "/api/batch" : "/api/download";
+
+        const res = await fetch(`${BACKEND_URL}${endpoint}`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             url: request.url,
             format_id: request.format_id || "bestvideo+bestaudio/best",
-            cookies
+            cookies,
+            delay_seconds: request.delay_seconds || 0
           })
         });
         const data = await res.json();
-        
+        if (!res.ok) {
+          sendResponse({ success: false, error: data.detail || "Download request rejected" });
+          return;
+        }
+
         if (data.job_id) {
           sendResponse({ success: true, jobId: data.job_id });
-          pollDownloadProgress(data.job_id);
+          trackDownloadProgress(data.job_id);
         } else {
           sendResponse({ success: false, error: "No job ID returned" });
         }
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === "CANCEL_JOB") {
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`${BACKEND_URL}/api/cancel/${request.jobId}`, { method: "POST", headers });
+        const data = await res.json();
+        sendResponse({ success: res.ok, data });
       } catch (err) {
         sendResponse({ success: false, error: err.message });
       }
@@ -155,7 +186,66 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// Poll download progress until complete, then trigger chrome.downloads
+// Primary tracker: attempts WebSocket connection first, falls back seamlessly to HTTP polling
+function trackDownloadProgress(jobId) {
+  let isFinished = false;
+
+  const wsScheme = BACKEND_URL.startsWith("https") ? "wss" : "ws";
+  const wsHost = BACKEND_URL.replace(/^https?:\/\//, "");
+  const wsUrl = `${wsScheme}://${wsHost}/api/ws/${jobId}`;
+
+  console.log(`[AnyDownloader] Connecting WebSocket: ${wsUrl}`);
+  let ws = null;
+
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (err) {
+    console.warn(`[AnyDownloader] WebSocket creation failed: ${err.message}. Falling back to polling.`);
+    pollDownloadProgress(jobId);
+    return;
+  }
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.ping) return;
+
+      chrome.runtime.sendMessage({ action: "JOB_PROGRESS_UPDATE", job: data });
+
+      if (data.status === "completed") {
+        isFinished = true;
+        ws.close();
+        if (data.file_path || data.filename) {
+          const fileUrl = `${BACKEND_URL}/api/file/${jobId}`;
+          chrome.downloads.download({
+            url: fileUrl,
+            filename: data.filename || "youtube_download",
+            saveAs: true
+          });
+        }
+      } else if (data.status === "failed" || data.status === "cancelled") {
+        isFinished = true;
+        ws.close();
+      }
+    } catch (e) {
+      console.error("[AnyDownloader] Error parsing WS message:", e);
+    }
+  };
+
+  ws.onerror = (err) => {
+    console.warn("[AnyDownloader] WebSocket error. Initiating HTTP polling fallback.", err);
+    if (!isFinished) pollDownloadProgress(jobId);
+  };
+
+  ws.onclose = () => {
+    if (!isFinished) {
+      console.log("[AnyDownloader] WebSocket closed. Switching to HTTP polling.");
+      pollDownloadProgress(jobId);
+    }
+  };
+}
+
+// HTTP Polling Fallback
 async function pollDownloadProgress(jobId) {
   const interval = setInterval(async () => {
     try {
@@ -166,19 +256,19 @@ async function pollDownloadProgress(jobId) {
       }
       const data = await res.json();
       
-      // Notify popup or content scripts
       chrome.runtime.sendMessage({ action: "JOB_PROGRESS_UPDATE", job: data });
 
       if (data.status === "completed") {
         clearInterval(interval);
-        // Trigger browser download
-        const fileUrl = `${BACKEND_URL}/api/file/${jobId}`;
-        chrome.downloads.download({
-          url: fileUrl,
-          filename: data.filename || "youtube_download",
-          saveAs: true
-        });
-      } else if (data.status === "failed") {
+        if (data.file_path || data.filename) {
+          const fileUrl = `${BACKEND_URL}/api/file/${jobId}`;
+          chrome.downloads.download({
+            url: fileUrl,
+            filename: data.filename || "youtube_download",
+            saveAs: true
+          });
+        }
+      } else if (data.status === "failed" || data.status === "cancelled") {
         clearInterval(interval);
       }
     } catch (e) {

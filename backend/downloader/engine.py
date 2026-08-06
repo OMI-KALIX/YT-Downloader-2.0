@@ -235,3 +235,69 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
             filename = os.path.splitext(filename)[0] + ".mp4"
 
         return filename
+
+def extract_playlist_items(url: str, cookie_path: Optional[str] = None, max_items: int = 25) -> List[Dict[str, Any]]:
+    """
+    Extracts individual video items from a playlist URL up to max_items limit.
+    """
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": "in_playlist",
+        "extractor_args": {
+            "youtube": {"skip": ["authcheck"]},
+            "youtubetab": {"skip": ["authcheck"]}
+        }
+    }
+    if cookie_path and os.path.exists(cookie_path):
+        ydl_opts["cookiefile"] = cookie_path
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            items = []
+            if "entries" in info and info["entries"]:
+                for idx, entry in enumerate(info["entries"]):
+                    if idx >= max_items:
+                        break
+                    entry_url = entry.get("url") or entry.get("webpage_url")
+                    if not entry_url and entry.get("id"):
+                        entry_url = f"https://www.youtube.com/watch?v={entry.get('id')}"
+                    if entry_url:
+                        items.append({
+                            "title": entry.get("title") or f"Item {idx + 1}",
+                            "url": entry_url,
+                            "id": entry.get("id")
+                        })
+            elif info.get("url") or info.get("webpage_url"):
+                items.append({
+                    "title": info.get("title", "Video"),
+                    "url": info.get("webpage_url") or info.get("url") or url,
+                    "id": info.get("id")
+                })
+            return items
+    except Exception as e:
+        logger.error(f"Failed extracting playlist items: {e}")
+        # Fallback single video item
+        return [{"title": "Media Item", "url": url}]
+
+def cleanup_expired_partials(retention_seconds: int = 3600):
+    """
+    Sweeps system temp directory for orphaned yt_dl_ directories and partial files older than retention_seconds.
+    """
+    import time
+    import shutil
+    temp_dir = tempfile.gettempdir()
+    now = time.time()
+    try:
+        for entry in os.listdir(temp_dir):
+            if entry.startswith("yt_dl_"):
+                full_path = os.path.join(temp_dir, entry)
+                if os.path.isdir(full_path):
+                    mtime = os.path.getmtime(full_path)
+                    if now - mtime > retention_seconds:
+                        shutil.rmtree(full_path, ignore_errors=True)
+                        logger.info(f"Purged expired partial download folder: {full_path}")
+    except Exception as e:
+        logger.warning(f"Error during partial download cleanup sweep: {e}")
+
