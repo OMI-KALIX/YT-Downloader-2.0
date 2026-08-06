@@ -7,7 +7,7 @@ import logging
 from typing import Optional, List, Dict, Any
 
 from backend.cookies.manager import temporary_cookie_file
-from backend.downloader.engine import download_media, extract_playlist_items, cleanup_expired_partials, BotCheckError, FormatNotAvailableError
+from backend.downloader.engine import download_media, extract_playlist_items, cleanup_expired_partials, BotCheckError, FormatNotAvailableError, RateLimit429Error
 from backend.progress.tracker import progress_tracker
 
 logger = logging.getLogger("yt_backend")
@@ -101,6 +101,14 @@ def process_download_job(job_id: str, url: str, format_id: str, cookie_content: 
             else:
                 raise FileNotFoundError(f"Downloaded file not found at {file_path}")
 
+    except RateLimit429Error as e:
+        if not is_cancelled(job_id):
+            logger.warning(f"Job {job_id} hit HTTP 429 rate limit: {e}")
+            progress_tracker.update_job(job_id, {
+                "status": "failed",
+                "error_code": "RATE_LIMIT_EXCEEDED",
+                "error": "YouTube is temporarily rate-limiting requests — please try again in a few minutes."
+            })
     except BotCheckError as e:
         if not is_cancelled(job_id):
             logger.warning(f"Job {job_id} encountered bot-check block: {e}")

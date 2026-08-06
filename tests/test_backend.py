@@ -183,3 +183,24 @@ def test_js_runtimes_deno_config():
     with yt_dlp.YoutubeDL(opts) as ydl:
         assert "deno" in opts["js_runtimes"]
         assert "node" in opts["js_runtimes"]
+
+def test_rate_limit_429_and_caching():
+    from backend.downloader.engine import is_rate_limit_429_error, format_cache, video_cooldown_tracker, RateLimit429Error
+
+    # Test 429 error detector
+    err429 = Exception("yt_dlp.utils.ExtractorError: [youtube] Unable to download webpage: HTTP Error 429: Too Many Requests")
+    assert is_rate_limit_429_error(err429) is True
+
+    # Test format probe cache set and get
+    test_key = "test_vid_123_nocookie"
+    dummy_data = {"id": "test_vid_123", "title": "Test Video"}
+    format_cache.set(test_key, dummy_data, ttl=60)
+    cached = format_cache.get(test_key)
+    assert cached is not None
+    assert cached["title"] == "Test Video"
+
+    # Test VideoCooldownTracker
+    vid_key = "https://youtube.com/watch?v=cooldowntest"
+    video_cooldown_tracker.check_and_update(vid_key)
+    wait = video_cooldown_tracker.check_and_update(vid_key)
+    assert wait > 0.0

@@ -1,5 +1,7 @@
 import os
+import time
 import tempfile
+import threading
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 import yt_dlp
@@ -9,6 +11,8 @@ from backend.progress.tracker import progress_tracker
 logger = logging.getLogger("yt_backend")
 
 FALLBACK_CLIENTS = ["default", "android", "ios"]
+MAX_ATTEMPTS_PER_JOB = 3
+RETRY_BACKOFF_SECONDS = float(os.environ.get("RETRY_BACKOFF_SECONDS", "2.0"))
 
 class BotCheckError(yt_dlp.utils.DownloadError):
     """Raised when all player clients hit YouTube's bot-verification challenge."""
@@ -18,6 +22,10 @@ class FormatNotAvailableError(yt_dlp.utils.DownloadError):
     """Raised when requested format is not available and all fallbacks fail."""
     pass
 
+class RateLimit429Error(yt_dlp.utils.DownloadError):
+    """Raised when YouTube responds with HTTP 429 Too Many Requests."""
+    pass
+
 def is_bot_check_error(err: Exception) -> bool:
     msg = str(err).lower()
     return "confirm you're not a bot" in msg or "confirm you’re not a bot" in msg or "sign in to confirm" in msg or "bot check" in msg
@@ -25,6 +33,53 @@ def is_bot_check_error(err: Exception) -> bool:
 def is_format_not_available_error(err: Exception) -> bool:
     msg = str(err).lower()
     return "requested format is not available" in msg or "format is not available" in msg
+
+def is_rate_limit_429_error(err: Exception) -> bool:
+    msg = str(err).lower()
+    return "429" in msg or "too many requests" in msg
+
+class FormatCache:
+    def __init__(self, default_ttl: int = 300):
+        self._cache: Dict[str, Tuple[Dict[str, Any], float]] = {}
+        self._lock = threading.Lock()
+        self._default_ttl = default_ttl
+
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            if key in self._cache:
+                data, expiry = self._cache[key]
+                if time.time() < expiry:
+                    logger.info(f"Serving cached format metadata probe for key {key}")
+                    return dict(data)
+                else:
+                    self._cache.pop(key, None)
+        return None
+
+    def set(self, key: str, data: Dict[str, Any], ttl: Optional[int] = None) -> None:
+        ttl_sec = ttl if ttl is not None else self._default_ttl
+        with self._lock:
+            self._cache[key] = (dict(data), time.time() + ttl_sec)
+
+format_cache = FormatCache(default_ttl=int(os.environ.get("YTDLP_CACHE_TTL", "300")))
+
+class VideoCooldownTracker:
+    def __init__(self, cooldown_seconds: int = 15):
+        self._last_times: Dict[str, float] = {}
+        self._lock = threading.Lock()
+        self._cooldown = cooldown_seconds
+
+    def check_and_update(self, key: str) -> float:
+        with self._lock:
+            now = time.time()
+            last_time = self._last_times.get(key, 0)
+            elapsed = now - last_time
+            self._last_times[key] = now
+            if elapsed < self._cooldown and last_time > 0:
+                wait_sec = self._cooldown - elapsed
+                return wait_sec
+            return 0.0
+
+video_cooldown_tracker = VideoCooldownTracker(cooldown_seconds=int(os.environ.get("YTDLP_VIDEO_COOLDOWN", "15")))
 
 def resolve_format_spec(format_id: str) -> Tuple[str, bool, str]:
     """
@@ -135,9 +190,22 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
     """
     Extracts video metadata and list of available quality options (formats up to 4K & 320kbps audio)
     with accurate download file size estimates.
-    Includes automatic keyless oEmbed API fallback for instant metadata loading.
+    Includes memory caching (TTL 5m) and per-video cooldowns to eliminate 429 retry storms.
     """
     url = clean_youtube_url(url)
+    cache_key = f"{url}_{cookie_path or 'nocookie'}"
+    
+    # 1. Check probe cache first
+    cached_formats = format_cache.get(cache_key)
+    if cached_formats:
+        return cached_formats
+
+    # 2. Per-video request cooldown
+    cooldown_wait = video_cooldown_tracker.check_and_update(url)
+    if cooldown_wait > 0:
+        logger.info(f"Video {url} under cooldown window. Waiting {cooldown_wait:.1f}s before probe extraction...")
+        time.sleep(cooldown_wait)
+
     base_opts = {
         "quiet": True,
         "no_warnings": True,
@@ -245,7 +313,7 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
                 {"format_id": "bestvideo+bestaudio/best", "resolution": best_label, "type": "video"}
             ] + formats_list + audio_formats
 
-            return {
+            res_data = {
                 "id": info.get("id"),
                 "title": info.get("title"),
                 "thumbnail": info.get("thumbnail"),
@@ -253,9 +321,17 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
                 "uploader": info.get("uploader"),
                 "formats": result_formats
             }
+            format_cache.set(cache_key, res_data)
+            return res_data
 
     last_error = None
+    attempt = 0
     for client in FALLBACK_CLIENTS:
+        attempt += 1
+        if attempt > MAX_ATTEMPTS_PER_JOB:
+            logger.warning(f"Maximum extraction attempts ({MAX_ATTEMPTS_PER_JOB}) reached for format probe. Aborting further client fallbacks.")
+            break
+
         opts = dict(base_opts)
         if client == "android":
             opts["extractor_args"] = {"youtube": {"player_client": ["android", "mweb"]}}
@@ -263,22 +339,32 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
             opts["extractor_args"] = {"youtube": {"player_client": ["ios", "mweb"]}}
 
         try:
+            logger.info(f"Format probe attempt {attempt}/{MAX_ATTEMPTS_PER_JOB} [client: {client}] for {url}")
             return extract_with_opts(opts)
         except Exception as e:
             last_error = e
+            if is_rate_limit_429_error(e):
+                logger.warning(f"HTTP 429 rate limit encountered during format probe for {url}: {e}. Aborting retries immediately.")
+                raise RateLimit429Error("YouTube is temporarily rate-limiting requests — please try again in a few minutes.")
+
             if is_bot_check_error(e):
-                logger.warning(f"Player client '{client}' hit YouTube bot check during format extraction: {e}. Retrying next client...")
+                logger.warning(f"Player client '{client}' hit YouTube bot check during format extraction: {e}.")
+                backoff_time = RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                logger.info(f"Applying backoff delay of {backoff_time:.1f}s before next client attempt...")
+                time.sleep(backoff_time)
                 continue
             else:
                 raise e
 
-    if "cookiefile" in base_opts:
+    if "cookiefile" in base_opts and attempt < MAX_ATTEMPTS_PER_JOB:
         logger.warning("All player clients with cookies hit YouTube bot check during format extraction. Retrying without cookiefile...")
         opts_no_cookie = dict(base_opts)
         opts_no_cookie.pop("cookiefile", None)
         try:
             return extract_with_opts(opts_no_cookie)
         except Exception as e:
+            if is_rate_limit_429_error(e):
+                raise RateLimit429Error("YouTube is temporarily rate-limiting requests — please try again in a few minutes.")
             if not is_bot_check_error(e):
                 raise e
 
@@ -294,7 +380,7 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
             {"format_id": "audio_192k", "resolution": "🎵 Medium Quality Audio (192 kbps MP3)", "type": "audio", "bitrate": 192},
             {"format_id": "audio_128k", "resolution": "🎵 Standard Quality Audio (128 kbps MP3)", "type": "audio", "bitrate": 128},
         ]
-        return {
+        res_oembed = {
             "id": url.split("v=")[-1].split("&")[0] if "v=" in url else "video",
             "title": oembed_data.get("title"),
             "thumbnail": oembed_data.get("thumbnail"),
@@ -302,7 +388,11 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
             "uploader": oembed_data.get("uploader"),
             "formats": fallback_formats
         }
+        format_cache.set(cache_key, res_oembed)
+        return res_oembed
 
+    if last_error and is_rate_limit_429_error(last_error):
+        raise RateLimit429Error("YouTube is temporarily rate-limiting requests — please try again in a few minutes.")
     if last_error and is_bot_check_error(last_error):
         raise BotCheckError("This video's source is temporarily blocking automated downloads — please try again in a few minutes.")
     raise last_error or RuntimeError("Format extraction failed")
@@ -420,6 +510,12 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
     if cookie_path and os.path.exists(cookie_path):
         base_ydl_opts["cookiefile"] = cookie_path
 
+    # Per-video request cooldown
+    cooldown_wait = video_cooldown_tracker.check_and_update(url)
+    if cooldown_wait > 0:
+        logger.info(f"Video {url} under cooldown window. Waiting {cooldown_wait:.1f}s before starting download...")
+        time.sleep(cooldown_wait)
+
     logger.info(f"Starting optimized yt-dlp download for job {job_id} [format_id: {format_id} -> format_spec: {format_spec}]")
     
     def resolve_downloaded_file(info_dict: dict) -> str:
@@ -453,6 +549,10 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
                 info = ydl.extract_info(url, download=True)
                 return resolve_downloaded_file(info)
         except Exception as e:
+            if is_rate_limit_429_error(e):
+                logger.warning(f"HTTP 429 rate limit encountered during download attempt: {e}. Aborting retries immediately.")
+                raise RateLimit429Error("YouTube is temporarily rate-limiting requests — please try again in a few minutes.")
+
             if is_format_not_available_error(e):
                 logger.warning(f"Format spec '{opts.get('format')}' unavailable for {url}. Executing format staleness fallback...")
                 fallback_opts = dict(opts)
@@ -462,6 +562,8 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
                         info_fb = ydl_fb.extract_info(url, download=True)
                         return resolve_downloaded_file(info_fb)
                 except Exception as e_fb:
+                    if is_rate_limit_429_error(e_fb):
+                        raise RateLimit429Error("YouTube is temporarily rate-limiting requests — please try again in a few minutes.")
                     if is_format_not_available_error(e_fb):
                         try:
                             probe_opts = {"quiet": True, "js_runtimes": {"deno": {}, "node": {}}}
@@ -476,7 +578,13 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
             raise e
 
     last_error = None
+    attempt = 0
     for client in FALLBACK_CLIENTS:
+        attempt += 1
+        if attempt > MAX_ATTEMPTS_PER_JOB:
+            logger.warning(f"Job {job_id} reached maximum attempt limit ({MAX_ATTEMPTS_PER_JOB}). Aborting further client fallbacks.")
+            break
+
         ydl_opts = dict(base_ydl_opts)
         if client == "android":
             ydl_opts["extractor_args"] = {"youtube": {"player_client": ["android", "mweb"]}}
@@ -484,12 +592,16 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
             ydl_opts["extractor_args"] = {"youtube": {"player_client": ["ios", "mweb"]}}
 
         try:
+            logger.info(f"Job {job_id} download attempt {attempt}/{MAX_ATTEMPTS_PER_JOB} [client: {client}] for {url}")
             return attempt_download_with_opts(ydl_opts)
         except Exception as e:
             last_error = e
+            if is_rate_limit_429_error(e):
+                raise RateLimit429Error("YouTube is temporarily rate-limiting requests — please try again in a few minutes.")
+
             if is_bot_check_error(e):
                 logger.warning(f"Player client '{client}' hit YouTube bot check for job {job_id}: {e}.")
-                if "cookiefile" in ydl_opts:
+                if "cookiefile" in ydl_opts and attempt < MAX_ATTEMPTS_PER_JOB:
                     logger.warning(f"Retrying player client '{client}' without cookiefile...")
                     opts_no_cookie = dict(ydl_opts)
                     opts_no_cookie.pop("cookiefile", None)
@@ -497,12 +609,20 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
                         return attempt_download_with_opts(opts_no_cookie)
                     except Exception as e2:
                         last_error = e2
+                        if is_rate_limit_429_error(e2):
+                            raise RateLimit429Error("YouTube is temporarily rate-limiting requests — please try again in a few minutes.")
                         if not is_bot_check_error(e2):
                             raise e2
+
+                backoff_time = RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                logger.info(f"Applying backoff delay of {backoff_time:.1f}s before next client attempt...")
+                time.sleep(backoff_time)
                 continue
             else:
                 raise e
 
+    if last_error and is_rate_limit_429_error(last_error):
+        raise RateLimit429Error("YouTube is temporarily rate-limiting requests — please try again in a few minutes.")
     if last_error and is_bot_check_error(last_error):
         raise BotCheckError("This video's source is temporarily blocking automated downloads — please try again in a few minutes.")
     if last_error and is_format_not_available_error(last_error):

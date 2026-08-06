@@ -138,6 +138,9 @@ The backend supports environment variables for tuning `yt-dlp` rate limiting, pr
 | `YTDLP_MAX_SLEEP_INTERVAL` | Float | Maximum seconds to sleep between downloads (e.g. `5.0`) |
 | `YTDLP_RATELIMIT` | String/Int | Download speed limit (e.g. `5M` or bytes/sec) |
 | `YTDLP_PROXY` | String | HTTP/HTTPS/SOCKS5 proxy URL (e.g. `http://user:pass@proxy.example.com:8080`) |
+| `YTDLP_CACHE_TTL` | Integer | Probe format extraction cache TTL in seconds (default `300`) |
+| `YTDLP_VIDEO_COOLDOWN` | Integer | Per-video request cooldown window in seconds (default `15`) |
+| `RETRY_BACKOFF_SECONDS` | Float | Base exponential backoff delay before retries in seconds (default `2.0`) |
 
 ### Residential/Mobile Proxy Integration for Datacenter IPs (Render)
 Cloud host providers (like Render, AWS, GCP) use shared datacenter IP ranges. If YouTube increases bot verification enforcement on datacenter IPs, setting `YTDLP_PROXY` to a residential or mobile proxy route is the most durable solution to bypass IP reputation blocks.
