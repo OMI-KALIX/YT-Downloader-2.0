@@ -1,0 +1,11 @@
+{
+    "port": 8000,
+    "host": "127.0.0.1",
+    "download_dir": "",
+    "max_concurrent_jobs": 3,
+    "log_level": "INFO",
+    "auto_start_windows": false,
+    "start_minimized": true,
+    "cookies_file": "",
+    "ytdlp_proxy": ""
+}
