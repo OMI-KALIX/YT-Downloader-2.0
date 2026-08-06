@@ -143,7 +143,7 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
         "no_warnings": True,
         "extract_flat": False,
         "noplaylist": True,
-        "js_runtimes": {"node": {}},
+        "js_runtimes": {"deno": {}, "node": {}},
     }
     base_opts.update(get_env_ydl_opts())
 
@@ -387,7 +387,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
         "no_warnings": True,
         "noplaylist": True,
         "socket_timeout": 20,
-        "js_runtimes": {"node": {}},
+        "js_runtimes": {"deno": {}, "node": {}},
         "format_sort": ["res", "fps", "codec", "size", "br"],
         
         # Resume download & retry optimizations
@@ -464,7 +464,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
                 except Exception as e_fb:
                     if is_format_not_available_error(e_fb):
                         try:
-                            probe_opts = {"quiet": True, "js_runtimes": {"node": {}}}
+                            probe_opts = {"quiet": True, "js_runtimes": {"deno": {}, "node": {}}}
                             with yt_dlp.YoutubeDL(probe_opts) as ydl_p:
                                 p_info = ydl_p.extract_info(url, download=False)
                                 fmts = [f.get("format_id") for f in p_info.get("formats", [])]

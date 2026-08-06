@@ -6,7 +6,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     nodejs \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Deno (JS runtime required by yt-dlp for YouTube cipher decryption)
+RUN curl -fsSL https://deno.land/install.sh | sh \
+    && cp /root/.deno/bin/deno /usr/local/bin/deno \
+    && chmod 755 /usr/local/bin/deno \
+    && deno --version
 
 WORKDIR /app
 

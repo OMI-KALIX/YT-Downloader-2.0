@@ -176,3 +176,10 @@ def test_resolve_format_spec_and_format_error():
     # Test format error checker
     err = Exception("yt_dlp.utils.ExtractorError: [youtube] Requested format is not available. Use --list-formats for a list")
     assert is_format_not_available_error(err) is True
+
+def test_js_runtimes_deno_config():
+    import yt_dlp
+    opts = {"quiet": True, "js_runtimes": {"deno": {}, "node": {}}}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        assert "deno" in opts["js_runtimes"]
+        assert "node" in opts["js_runtimes"]
