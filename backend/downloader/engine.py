@@ -317,7 +317,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
 
     if is_audio:
         ydl_opts.update({
-            "format": "bestaudio/best/ba/b/140/251/18",
+            "format": "bestaudio/best",
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
@@ -326,7 +326,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
         })
     else:
         target_fmt = format_id if format_id else "bestvideo+bestaudio/best"
-        target_fmt = f"{target_fmt}/bestvideo+bestaudio/best/18/b/ba"
+        target_fmt = f"{target_fmt}/bestvideo+bestaudio/best"
         ydl_opts.update({
             "format": target_fmt,
             "merge_output_format": "mp4",
@@ -373,10 +373,10 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
         tier2_opts = dict(ydl_opts)
         tier2_opts["extractor_args"] = {"youtube": {"player_client": ["android", "mweb", "web"]}}
         if is_audio:
-            tier2_opts["format"] = "bestaudio/best/ba/b/140/251/18/best"
+            tier2_opts["format"] = "bestaudio/best"
         else:
             target_fmt = format_id if format_id else "bestvideo+bestaudio/best"
-            tier2_opts["format"] = f"{target_fmt}/bestvideo+bestaudio/best/18/b/ba/best"
+            tier2_opts["format"] = f"{target_fmt}/bestvideo+bestaudio/best"
 
         try:
             with yt_dlp.YoutubeDL(tier2_opts) as ydl:
