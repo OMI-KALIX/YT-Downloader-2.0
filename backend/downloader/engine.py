@@ -40,8 +40,13 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
         "extract_flat": False,
         "noplaylist": True,
         "extractor_args": {
-            "youtube": {"skip": ["authcheck"]},
-            "youtubetab": {"skip": ["authcheck"]}
+            "youtube": {
+                "player_client": ["mweb", "ios", "android", "web"],
+                "skip": ["authcheck"]
+            },
+            "youtubetab": {
+                "skip": ["authcheck"]
+            }
         }
     }
     if cookie_path and os.path.exists(cookie_path):
@@ -189,8 +194,13 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
         "no_warnings": True,
         "noplaylist": True,
         "extractor_args": {
-            "youtube": {"skip": ["authcheck"]},
-            "youtubetab": {"skip": ["authcheck"]}
+            "youtube": {
+                "player_client": ["mweb", "ios", "android", "web"],
+                "skip": ["authcheck"]
+            },
+            "youtubetab": {
+                "skip": ["authcheck"]
+            }
         },
         
         # Resume download & retry optimizations
@@ -206,7 +216,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
 
     if is_audio:
         ydl_opts.update({
-            "format": "bestaudio/best",
+            "format": "bestaudio/best/ba/b",
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
@@ -214,8 +224,11 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
             }]
         })
     else:
+        target_fmt = format_id if format_id else "bestvideo+bestaudio/best"
+        if not target_fmt.endswith("/best"):
+            target_fmt += "/bestvideo+bestaudio/best"
         ydl_opts.update({
-            "format": format_id if format_id else "bestvideo+bestaudio/best",
+            "format": target_fmt,
             "merge_output_format": "mp4",
         })
 
@@ -224,17 +237,34 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
 
     logger.info(f"Starting optimized yt-dlp download for job {job_id} [format: {format_id}]")
     
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
-        
-        if is_audio:
-            base, _ = os.path.splitext(filename)
-            filename = base + ".mp3"
-        elif not filename.endswith(".mp4") and os.path.exists(os.path.splitext(filename)[0] + ".mp4"):
-            filename = os.path.splitext(filename)[0] + ".mp4"
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+            
+            if is_audio:
+                base, _ = os.path.splitext(filename)
+                filename = base + ".mp3"
+            elif not filename.endswith(".mp4") and os.path.exists(os.path.splitext(filename)[0] + ".mp4"):
+                filename = os.path.splitext(filename)[0] + ".mp4"
 
-        return filename
+            return filename
+    except yt_dlp.utils.DownloadError as e:
+        if "Requested format is not available" in str(e):
+            logger.warning(f"Requested format '{format_id}' unavailable for job {job_id}. Attempting resilient fallback download...")
+            fallback_opts = dict(ydl_opts)
+            fallback_opts["format"] = "ba/b/best" if is_audio else "bestvideo+bestaudio/best"
+            with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(info)
+                if is_audio:
+                    base, _ = os.path.splitext(filename)
+                    filename = base + ".mp3"
+                elif not filename.endswith(".mp4") and os.path.exists(os.path.splitext(filename)[0] + ".mp4"):
+                    filename = os.path.splitext(filename)[0] + ".mp4"
+                return filename
+        raise e
+
 
 def extract_playlist_items(url: str, cookie_path: Optional[str] = None, max_items: int = 25) -> List[Dict[str, Any]]:
     """
