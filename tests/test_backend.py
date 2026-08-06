@@ -117,3 +117,34 @@ def test_pause_resume_cancel_endpoints():
     assert res_cancel.status_code == 200
     assert res_cancel.json()["status"] == "cancelled"
     assert is_cancelled(job_id) is True
+
+def test_cookie_diagnostics_and_bot_check_mapping():
+    from backend.progress.tracker import progress_tracker
+    from backend.jobs.manager import start_download_job
+    from backend.downloader.engine import is_bot_check_error, get_env_ydl_opts, BotCheckError
+
+    # Test cookie diagnostics boolean flag
+    job_id_no_cookies = start_download_job("https://youtube.com/watch?v=dQw4w9WgXcQ", "audio_128k", cookie_content="")
+    job_no_cookies = progress_tracker.get_job(job_id_no_cookies)
+    assert job_no_cookies["cookies_supplied"] is False
+
+    job_id_with_cookies = start_download_job("https://youtube.com/watch?v=dQw4w9WgXcQ", "audio_128k", cookie_content="dummy_cookie_val")
+    job_with_cookies = progress_tracker.get_job(job_id_with_cookies)
+    assert job_with_cookies["cookies_supplied"] is True
+
+    # Test is_bot_check_error helper
+    err1 = Exception("yt_dlp.utils.ExtractorError: [youtube] Sign in to confirm you're not a bot.")
+    assert is_bot_check_error(err1) is True
+    err2 = Exception("yt_dlp.utils.ExtractorError: [youtube] Sign in to confirm you’re not a bot.")
+    assert is_bot_check_error(err2) is True
+    err3 = Exception("Video unavailable")
+    assert is_bot_check_error(err3) is False
+
+    # Test get_env_ydl_opts parsing
+    os.environ["YTDLP_SLEEP_REQUESTS"] = "1.5"
+    os.environ["YTDLP_PROXY"] = "http://127.0.0.1:8080"
+    opts = get_env_ydl_opts()
+    assert opts.get("sleep_requests") == 1.5
+    assert opts.get("proxy") == "http://127.0.0.1:8080"
+    os.environ.pop("YTDLP_SLEEP_REQUESTS", None)
+    os.environ.pop("YTDLP_PROXY", None)

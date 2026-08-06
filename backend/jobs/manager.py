@@ -7,7 +7,7 @@ import logging
 from typing import Optional, List, Dict, Any
 
 from backend.cookies.manager import temporary_cookie_file
-from backend.downloader.engine import download_media, extract_playlist_items, cleanup_expired_partials
+from backend.downloader.engine import download_media, extract_playlist_items, cleanup_expired_partials, BotCheckError
 from backend.progress.tracker import progress_tracker
 
 logger = logging.getLogger("yt_backend")
@@ -75,9 +75,11 @@ def process_download_job(job_id: str, url: str, format_id: str, cookie_content: 
         return
 
     download_dir = tempfile.mkdtemp(prefix="yt_dl_")
+    cookies_present = bool(cookie_content and cookie_content.strip())
+    logger.info(f"Job {job_id}: cookies_supplied={cookies_present}")
     
     try:
-        progress_tracker.update_job(job_id, {"status": "starting"})
+        progress_tracker.update_job(job_id, {"status": "starting", "cookies_supplied": cookies_present})
         
         with temporary_cookie_file(cookie_content or "") as cookie_path:
             file_path = download_media(job_id, url, format_id, download_dir, cookie_path)
@@ -92,17 +94,27 @@ def process_download_job(job_id: str, url: str, format_id: str, cookie_content: 
                     "percent": 100.0,
                     "filename": filename,
                     "file_path": file_path,
+                    "error_code": None,
                     "error": None
                 })
                 logger.info(f"Job {job_id} successfully completed: {file_path}")
             else:
                 raise FileNotFoundError(f"Downloaded file not found at {file_path}")
 
+    except BotCheckError as e:
+        if not is_cancelled(job_id):
+            logger.warning(f"Job {job_id} encountered bot-check block: {e}")
+            progress_tracker.update_job(job_id, {
+                "status": "failed",
+                "error_code": "SOURCE_BOT_CHECK_FAILED",
+                "error": "This video's source is temporarily blocking automated downloads — please try again in a few minutes."
+            })
     except Exception as e:
         if not is_cancelled(job_id):
             logger.error(f"Job {job_id} failed: {e}", exc_info=True)
             progress_tracker.update_job(job_id, {
                 "status": "failed",
+                "error_code": "UNKNOWN_ERROR",
                 "error": str(e)
             })
 
@@ -111,7 +123,10 @@ def start_download_job(url: str, format_id: str, cookie_content: Optional[str] =
     Generates job ID, creates job state in tracker, and launches worker thread.
     """
     job_id = str(uuid.uuid4())
+    cookies_present = bool(cookie_content and cookie_content.strip())
+    logger.info(f"Job {job_id} initialized: cookies_supplied={cookies_present}")
     progress_tracker.create_job(job_id, url)
+    progress_tracker.update_job(job_id, {"cookies_supplied": cookies_present})
     
     thread = threading.Thread(
         target=process_download_job,

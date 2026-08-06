@@ -8,6 +8,49 @@ from backend.progress.tracker import progress_tracker
 
 logger = logging.getLogger("yt_backend")
 
+FALLBACK_CLIENTS = ["default", "android", "ios"]
+
+class BotCheckError(yt_dlp.utils.DownloadError):
+    """Raised when all player clients hit YouTube's bot-verification challenge."""
+    pass
+
+def is_bot_check_error(err: Exception) -> bool:
+    msg = str(err).lower()
+    return "confirm you're not a bot" in msg or "confirm you’re not a bot" in msg or "sign in to confirm" in msg or "bot check" in msg
+
+def get_env_ydl_opts() -> Dict[str, Any]:
+    opts: Dict[str, Any] = {}
+    
+    if os.environ.get("YTDLP_SLEEP_REQUESTS"):
+        try:
+            opts["sleep_requests"] = float(os.environ["YTDLP_SLEEP_REQUESTS"])
+        except ValueError:
+            pass
+
+    if os.environ.get("YTDLP_SLEEP_INTERVAL"):
+        try:
+            opts["sleep_interval"] = float(os.environ["YTDLP_SLEEP_INTERVAL"])
+        except ValueError:
+            pass
+
+    if os.environ.get("YTDLP_MAX_SLEEP_INTERVAL"):
+        try:
+            opts["max_sleep_interval"] = float(os.environ["YTDLP_MAX_SLEEP_INTERVAL"])
+        except ValueError:
+            pass
+
+    if os.environ.get("YTDLP_RATELIMIT"):
+        val = os.environ["YTDLP_RATELIMIT"]
+        try:
+            opts["ratelimit"] = int(val)
+        except ValueError:
+            opts["ratelimit"] = val
+
+    if os.environ.get("YTDLP_PROXY"):
+        opts["proxy"] = os.environ["YTDLP_PROXY"]
+
+    return opts
+
 def fetch_oembed_metadata(url: str) -> Optional[Dict[str, Any]]:
     """
     Keyless YouTube oEmbed API probe fallback. Instant 0.1s response, 0% bot verification failure.
@@ -56,15 +99,17 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
     Includes automatic keyless oEmbed API fallback for instant metadata loading.
     """
     url = clean_youtube_url(url)
-    ydl_opts = {
+    base_opts = {
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
         "noplaylist": True,
         "js_runtimes": {"node": {}},
     }
+    base_opts.update(get_env_ydl_opts())
+
     if cookie_path and os.path.exists(cookie_path):
-        ydl_opts["cookiefile"] = cookie_path
+        base_opts["cookiefile"] = cookie_path
 
     def extract_with_opts(opts):
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -170,47 +215,58 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
                 "formats": result_formats
             }
 
-    try:
-        return extract_with_opts(ydl_opts)
-    except Exception as e:
-        logger.warning(f"yt-dlp format extraction primary attempt failed: {e}. Retrying with player_client fallback...")
-        ydl_opts_fallback = dict(ydl_opts)
-        ydl_opts_fallback["extractor_args"] = {"youtube": {"player_client": ["android", "mweb", "web"]}}
+    last_error = None
+    for client in FALLBACK_CLIENTS:
+        opts = dict(base_opts)
+        if client == "android":
+            opts["extractor_args"] = {"youtube": {"player_client": ["android", "mweb"]}}
+        elif client == "ios":
+            opts["extractor_args"] = {"youtube": {"player_client": ["ios", "mweb"]}}
+
         try:
-            return extract_with_opts(ydl_opts_fallback)
-        except Exception as e2:
-            if "cookiefile" in ydl_opts:
-                logger.warning(f"yt-dlp format extraction failed with cookies: {e2}. Retrying without cookiefile...")
-                ydl_opts_no_cookie = dict(ydl_opts_fallback)
-                ydl_opts_no_cookie.pop("cookiefile", None)
-                try:
-                    return extract_with_opts(ydl_opts_no_cookie)
-                except Exception as e3:
-                    logger.warning(f"yt-dlp format extraction failed without cookies: {e3}. Attempting oEmbed fallback...")
+            return extract_with_opts(opts)
+        except Exception as e:
+            last_error = e
+            if is_bot_check_error(e):
+                logger.warning(f"Player client '{client}' hit YouTube bot check during format extraction: {e}. Retrying next client...")
+                continue
             else:
-                logger.warning(f"yt-dlp format extraction failed: {e2}. Attempting oEmbed fallback...")
-            
-        oembed_data = fetch_oembed_metadata(url)
-        if oembed_data:
-            fallback_formats = [
-                {"format_id": "bestvideo+bestaudio/best", "resolution": "🔥 Best Available Quality (Up to 4K)", "type": "video"},
-                {"format_id": "bestvideo[height<=1080]+bestaudio/best", "resolution": "Full HD (1080p)", "type": "video", "height": 1080},
-                {"format_id": "bestvideo[height<=720]+bestaudio/best", "resolution": "HD (720p)", "type": "video", "height": 720},
-                {"format_id": "bestvideo[height<=480]+bestaudio/best", "resolution": "480p SD", "type": "video", "height": 480},
-                {"format_id": "bestvideo[height<=360]+bestaudio/best", "resolution": "360p SD", "type": "video", "height": 360},
-                {"format_id": "audio_320k", "resolution": "🎵 High Quality Audio (320 kbps MP3)", "type": "audio", "bitrate": 320},
-                {"format_id": "audio_192k", "resolution": "🎵 Medium Quality Audio (192 kbps MP3)", "type": "audio", "bitrate": 192},
-                {"format_id": "audio_128k", "resolution": "🎵 Standard Quality Audio (128 kbps MP3)", "type": "audio", "bitrate": 128},
-            ]
-            return {
-                "id": url.split("v=")[-1].split("&")[0] if "v=" in url else "video",
-                "title": oembed_data.get("title"),
-                "thumbnail": oembed_data.get("thumbnail"),
-                "duration": None,
-                "uploader": oembed_data.get("uploader"),
-                "formats": fallback_formats
-            }
-        raise e
+                raise e
+
+    if "cookiefile" in base_opts:
+        logger.warning("All player clients with cookies hit YouTube bot check during format extraction. Retrying without cookiefile...")
+        opts_no_cookie = dict(base_opts)
+        opts_no_cookie.pop("cookiefile", None)
+        try:
+            return extract_with_opts(opts_no_cookie)
+        except Exception as e:
+            if not is_bot_check_error(e):
+                raise e
+
+    oembed_data = fetch_oembed_metadata(url)
+    if oembed_data:
+        fallback_formats = [
+            {"format_id": "bestvideo+bestaudio/best", "resolution": "🔥 Best Available Quality (Up to 4K)", "type": "video"},
+            {"format_id": "bestvideo[height<=1080]+bestaudio/best", "resolution": "Full HD (1080p)", "type": "video", "height": 1080},
+            {"format_id": "bestvideo[height<=720]+bestaudio/best", "resolution": "HD (720p)", "type": "video", "height": 720},
+            {"format_id": "bestvideo[height<=480]+bestaudio/best", "resolution": "480p SD", "type": "video", "height": 480},
+            {"format_id": "bestvideo[height<=360]+bestaudio/best", "resolution": "360p SD", "type": "video", "height": 360},
+            {"format_id": "audio_320k", "resolution": "🎵 High Quality Audio (320 kbps MP3)", "type": "audio", "bitrate": 320},
+            {"format_id": "audio_192k", "resolution": "🎵 Medium Quality Audio (192 kbps MP3)", "type": "audio", "bitrate": 192},
+            {"format_id": "audio_128k", "resolution": "🎵 Standard Quality Audio (128 kbps MP3)", "type": "audio", "bitrate": 128},
+        ]
+        return {
+            "id": url.split("v=")[-1].split("&")[0] if "v=" in url else "video",
+            "title": oembed_data.get("title"),
+            "thumbnail": oembed_data.get("thumbnail"),
+            "duration": None,
+            "uploader": oembed_data.get("uploader"),
+            "formats": fallback_formats
+        }
+
+    if last_error and is_bot_check_error(last_error):
+        raise BotCheckError("This video's source is temporarily blocking automated downloads — please try again in a few minutes.")
+    raise last_error or RuntimeError("Format extraction failed")
 
 def sanitize_filename(name: str) -> str:
     import re
@@ -294,7 +350,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
     elif "320" in format_id:
         audio_bitrate = "320"
 
-    ydl_opts: Dict[str, Any] = {
+    base_ydl_opts: Dict[str, Any] = {
         "outtmpl": output_template,
         "progress_hooks": [progress_hook],
         "quiet": True,
@@ -314,9 +370,10 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
         "concurrent_fragment_downloads": 4,
         "buffersize": 1024 * 64,  # 64KB memory buffer for optimal disk streaming
     }
+    base_ydl_opts.update(get_env_ydl_opts())
 
     if is_audio:
-        ydl_opts.update({
+        base_ydl_opts.update({
             "format": "bestaudio/best",
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
@@ -327,13 +384,13 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
     else:
         target_fmt = format_id if format_id else "bestvideo+bestaudio/best"
         target_fmt = f"{target_fmt}/bestvideo+bestaudio/best"
-        ydl_opts.update({
+        base_ydl_opts.update({
             "format": target_fmt,
             "merge_output_format": "mp4",
         })
 
     if cookie_path and os.path.exists(cookie_path):
-        ydl_opts["cookiefile"] = cookie_path
+        base_ydl_opts["cookiefile"] = cookie_path
 
     logger.info(f"Starting optimized yt-dlp download for job {job_id} [format: {format_id}]")
     
@@ -359,41 +416,45 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
                     return chosen
             return chosen
         
-        fallback_name = ydl.prepare_filename(info_dict)
-        if is_audio:
-            fallback_name = os.path.splitext(fallback_name)[0] + ".mp3"
+        fallback_name = os.path.join(output_dir, f"{clean_title}.mp3" if is_audio else f"{clean_title}.mp4")
         return fallback_name
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            return resolve_downloaded_file(info)
-    except yt_dlp.utils.DownloadError as e:
-        logger.warning(f"yt-dlp download failed for job {job_id}: {e}. Executing Tier 2 player_client fallback...")
-        tier2_opts = dict(ydl_opts)
-        tier2_opts["extractor_args"] = {"youtube": {"player_client": ["android", "mweb", "web"]}}
-        if is_audio:
-            tier2_opts["format"] = "bestaudio/best"
-        else:
-            target_fmt = format_id if format_id else "bestvideo+bestaudio/best"
-            tier2_opts["format"] = f"{target_fmt}/bestvideo+bestaudio/best"
+    last_error = None
+    for client in FALLBACK_CLIENTS:
+        ydl_opts = dict(base_ydl_opts)
+        if client == "android":
+            ydl_opts["extractor_args"] = {"youtube": {"player_client": ["android", "mweb"]}}
+        elif client == "ios":
+            ydl_opts["extractor_args"] = {"youtube": {"player_client": ["ios", "mweb"]}}
 
         try:
-            with yt_dlp.YoutubeDL(tier2_opts) as ydl:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 return resolve_downloaded_file(info)
-        except Exception as e2:
-            if "cookiefile" in tier2_opts:
-                logger.warning(f"yt-dlp download Tier 2 failed with cookies: {e2}. Executing Tier 3 fallback without cookies...")
-                tier3_opts = dict(tier2_opts)
-                tier3_opts.pop("cookiefile", None)
-                try:
-                    with yt_dlp.YoutubeDL(tier3_opts) as ydl:
-                        info = ydl.extract_info(url, download=True)
-                        return resolve_downloaded_file(info)
-                except Exception:
-                    raise e
-            raise e
+        except Exception as e:
+            last_error = e
+            if is_bot_check_error(e):
+                logger.warning(f"Player client '{client}' hit YouTube bot check for job {job_id}: {e}.")
+                if "cookiefile" in ydl_opts:
+                    logger.warning(f"Retrying player client '{client}' without cookiefile...")
+                    opts_no_cookie = dict(ydl_opts)
+                    opts_no_cookie.pop("cookiefile", None)
+                    try:
+                        with yt_dlp.YoutubeDL(opts_no_cookie) as ydl:
+                            info = ydl.extract_info(url, download=True)
+                            return resolve_downloaded_file(info)
+                    except Exception as e2:
+                        last_error = e2
+                        if not is_bot_check_error(e2):
+                            raise e2
+                continue
+            else:
+                # Non-bot check error (e.g. private video, deleted, invalid URL) -> fail fast
+                raise e
+
+    if last_error and is_bot_check_error(last_error):
+        raise BotCheckError("This video's source is temporarily blocking automated downloads — please try again in a few minutes.")
+    raise last_error or RuntimeError("Download failed")
 
 
 

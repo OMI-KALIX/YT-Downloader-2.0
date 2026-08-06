@@ -127,6 +127,23 @@ docker-compose -f docker/docker-compose.yml up --build
 
 ---
 
+## ⚙️ Environment Configuration & Datacenter IP Anti-Bot Mitigations
+
+The backend supports environment variables for tuning `yt-dlp` rate limiting, proxying, and image rebuilding:
+
+| Environment Variable | Type | Description |
+| :--- | :--- | :--- |
+| `YTDLP_SLEEP_REQUESTS` | Float | Seconds to sleep before each HTTP request (e.g. `1.0`) |
+| `YTDLP_SLEEP_INTERVAL` | Float | Minimum seconds to sleep between downloads (e.g. `1.0`) |
+| `YTDLP_MAX_SLEEP_INTERVAL` | Float | Maximum seconds to sleep between downloads (e.g. `5.0`) |
+| `YTDLP_RATELIMIT` | String/Int | Download speed limit (e.g. `5M` or bytes/sec) |
+| `YTDLP_PROXY` | String | HTTP/HTTPS/SOCKS5 proxy URL (e.g. `http://user:pass@proxy.example.com:8080`) |
+
+### Residential/Mobile Proxy Integration for Datacenter IPs (Render)
+Cloud host providers (like Render, AWS, GCP) use shared datacenter IP ranges. If YouTube increases bot verification enforcement on datacenter IPs, setting `YTDLP_PROXY` to a residential or mobile proxy route is the most durable solution to bypass IP reputation blocks.
+
+---
+
 ## 📄 License
 
 MIT License. Free for personal and open-source use.

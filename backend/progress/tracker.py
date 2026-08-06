@@ -38,6 +38,8 @@ class ProgressTracker:
                 "eta": "--:--",
                 "filename": "",
                 "file_path": "",
+                "cookies_supplied": False,
+                "error_code": None,
                 "error": None,
                 "created_at": time.time(),
                 "updated_at": time.time()
