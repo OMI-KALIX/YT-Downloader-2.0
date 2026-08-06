@@ -205,7 +205,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
 
     output_template = os.path.join(output_dir, "%(id)s.%(ext)s")
 
-    is_audio = format_id == "bestaudio/best" or "audio" in format_id
+    is_audio = format_id.startswith("audio_") or format_id in ["bestaudio/best", "bestaudio"]
     
     # Determine audio bitrate quality (320, 192, 128 kbps)
     audio_bitrate = "320"
