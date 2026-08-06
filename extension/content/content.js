@@ -194,6 +194,8 @@
       if (btn) {
         if (msg.job.status === "downloading") {
           btn.querySelector("span").textContent = `${msg.job.percent}%`;
+        } else if (msg.job.status === "paused") {
+          btn.querySelector("span").textContent = "Paused";
         } else if (msg.job.status === "completed") {
           btn.querySelector("span").textContent = "Done!";
           setTimeout(() => {
@@ -201,6 +203,11 @@
           }, 4000);
         } else if (msg.job.status === "failed") {
           btn.querySelector("span").textContent = "Failed";
+          setTimeout(() => {
+            btn.querySelector("span").textContent = "Download";
+          }, 3000);
+        } else if (msg.job.status === "cancelled") {
+          btn.querySelector("span").textContent = "Cancelled";
           setTimeout(() => {
             btn.querySelector("span").textContent = "Download";
           }, 3000);

@@ -92,3 +92,28 @@ def test_rate_limiter():
     with pytest.raises(HTTPException) as exc_info:
         enforce_rate_limit(test_ip)
     assert exc_info.value.status_code == 429
+
+def test_pause_resume_cancel_endpoints():
+    from backend.jobs.manager import is_paused, is_cancelled
+    from backend.progress.tracker import progress_tracker
+
+    job_id = "test-job-control-123"
+    progress_tracker.create_job(job_id, "https://youtube.com/watch?v=abc")
+
+    # Test Pause endpoint
+    res_pause = client.post(f"/api/pause/{job_id}")
+    assert res_pause.status_code == 200
+    assert res_pause.json()["status"] == "paused"
+    assert is_paused(job_id) is True
+
+    # Test Resume endpoint
+    res_resume = client.post(f"/api/resume/{job_id}")
+    assert res_resume.status_code == 200
+    assert res_resume.json()["status"] == "resumed"
+    assert is_paused(job_id) is False
+
+    # Test Cancel endpoint
+    res_cancel = client.post(f"/api/cancel/{job_id}")
+    assert res_cancel.status_code == 200
+    assert res_cancel.json()["status"] == "cancelled"
+    assert is_cancelled(job_id) is True

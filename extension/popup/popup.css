@@ -253,6 +253,42 @@ select:focus, input:focus {
   color: #a1a1aa;
 }
 
+.job-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.btn-ctrl {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid #3f3f46;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #27272a;
+  color: #f4f4f5;
+}
+
+.pause-btn:hover, .resume-btn:hover {
+  background: #3f3f46;
+  border-color: #52525b;
+}
+
+.cancel-btn {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+}
+
+.cancel-btn:hover {
+  background: rgba(239, 68, 68, 0.3);
+  border-color: #ef4444;
+  color: #ffffff;
+}
+
 .history-header {
   display: flex;
   justify-content: space-between;

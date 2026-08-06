@@ -9,7 +9,7 @@ from pydantic import BaseModel, HttpUrl
 
 from backend.downloader.engine import get_video_formats
 from backend.cookies.manager import temporary_cookie_file
-from backend.jobs.manager import start_download_job, start_batch_job, cancel_job
+from backend.jobs.manager import start_download_job, start_batch_job, cancel_job, pause_job, resume_job
 from backend.progress.tracker import progress_tracker
 
 logger = logging.getLogger("yt_backend")
@@ -125,6 +125,20 @@ def cancel_download_job(job_id: str):
     if not success:
         raise HTTPException(status_code=404, detail="Job not found or already ended")
     return {"status": "cancelled", "job_id": job_id}
+
+@router.post("/pause/{job_id}")
+def pause_download_job(job_id: str):
+    success = pause_job(job_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Job not found or already ended")
+    return {"status": "paused", "job_id": job_id}
+
+@router.post("/resume/{job_id}")
+def resume_download_job(job_id: str):
+    success = resume_job(job_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Job not found or already ended")
+    return {"status": "resumed", "job_id": job_id}
 
 @router.get("/progress/{job_id}")
 def check_progress(job_id: str):

@@ -38,9 +38,21 @@ def clean_youtube_url(url: str) -> str:
         return url.split("&list=")[0]
     return url
 
+def format_size(bytes_val: float) -> str:
+    if not bytes_val or bytes_val <= 0:
+        return ""
+    if bytes_val >= 1024**3:
+        return f"~{bytes_val / (1024**3):.1f} GB"
+    elif bytes_val >= 1024**2:
+        return f"~{bytes_val / (1024**2):.1f} MB"
+    elif bytes_val >= 1024:
+        return f"~{bytes_val / 1024:.0f} KB"
+    return f"~{int(bytes_val)} B"
+
 def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, Any]:
     """
-    Extracts video metadata and list of available quality options (formats up to 4K & 320kbps audio).
+    Extracts video metadata and list of available quality options (formats up to 4K & 320kbps audio)
+    with accurate download file size estimates.
     Includes automatic keyless oEmbed API fallback for instant metadata loading.
     """
     url = clean_youtube_url(url)
@@ -49,11 +61,7 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
         "no_warnings": True,
         "extract_flat": False,
         "noplaylist": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "ios", "mweb", "web"]
-            }
-        }
+        "js_runtimes": {"node": {}},
     }
     if cookie_path and os.path.exists(cookie_path):
         ydl_opts["cookiefile"] = cookie_path
@@ -61,8 +69,29 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
     def extract_with_opts(opts):
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
+            duration = info.get("duration") or 0
             formats_list = []
+
             if "formats" in info:
+                # Calculate maximum audio format size
+                audio_sizes = [
+                    f.get("filesize") or f.get("filesize_approx") or 0
+                    for f in info["formats"] if f.get("vcodec") == "none"
+                ]
+                best_audio_bytes = max(audio_sizes) if audio_sizes else (duration * 128000 / 8)
+
+                # Group best video stream size per resolution height
+                height_video_bytes = {}
+                for f in info["formats"]:
+                    h = f.get("height")
+                    vcodec = f.get("vcodec", "none")
+                    if h and vcodec != "none":
+                        sz = f.get("filesize") or f.get("filesize_approx") or 0
+                        if not sz and duration and f.get("vbr"):
+                            sz = (f.get("vbr") * 1000 * duration) / 8
+                        if h not in height_video_bytes or sz > height_video_bytes[h]:
+                            height_video_bytes[h] = sz
+
                 seen_res = set()
                 for f in info["formats"]:
                     vcodec = f.get("vcodec", "none")
@@ -72,7 +101,7 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
                     if height and height not in seen_res and vcodec != "none":
                         seen_res.add(height)
                         
-                        # Create clear quality labels (e.g. 4K Ultra HD, 2K, 1080p, 720p, 480p, 360p, 240p, 144p)
+                        # Create clear quality labels with file size
                         label = f"{height}p"
                         if height >= 4320:
                             label = "8K Ultra HD (4320p)"
@@ -93,26 +122,43 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
                         elif height >= 144:
                             label = "144p Very Low"
 
+                        v_bytes = height_video_bytes.get(height, 0)
+                        tot_bytes = v_bytes + best_audio_bytes if v_bytes > 0 else 0
+                        sz_str = format_size(tot_bytes)
+                        if sz_str:
+                            label = f"{label} ({sz_str})"
+
                         formats_list.append({
                             "format_id": f"bestvideo[height<={height}]+bestaudio/best[height<={height}]",
                             "resolution": label,
                             "type": "video",
-                            "height": height
+                            "height": height,
+                            "filesize": tot_bytes
                         })
                 
                 # Sort by height descending
                 formats_list.sort(key=lambda x: x.get("height", 0), reverse=True)
 
-            # Audio Quality Presets (320 kbps, 192 kbps, 128 kbps)
+            # Audio Quality Presets with file size estimates
+            sz_320k = format_size(duration * 320000 / 8) if duration else ""
+            sz_192k = format_size(duration * 192000 / 8) if duration else ""
+            sz_128k = format_size(duration * 128000 / 8) if duration else ""
+
+            lbl_320 = f"🎵 High Quality Audio (320 kbps MP3){' (' + sz_320k + ')' if sz_320k else ''}"
+            lbl_192 = f"🎵 Medium Quality Audio (192 kbps MP3){' (' + sz_192k + ')' if sz_192k else ''}"
+            lbl_128 = f"🎵 Standard Quality Audio (128 kbps MP3){' (' + sz_128k + ')' if sz_128k else ''}"
+
             audio_formats = [
-                {"format_id": "audio_320k", "resolution": "🎵 High Quality Audio (320 kbps MP3)", "type": "audio", "bitrate": 320},
-                {"format_id": "audio_192k", "resolution": "🎵 Medium Quality Audio (192 kbps MP3)", "type": "audio", "bitrate": 192},
-                {"format_id": "audio_128k", "resolution": "🎵 Standard Quality Audio (128 kbps MP3)", "type": "audio", "bitrate": 128},
+                {"format_id": "audio_320k", "resolution": lbl_320, "type": "audio", "bitrate": 320},
+                {"format_id": "audio_192k", "resolution": lbl_192, "type": "audio", "bitrate": 192},
+                {"format_id": "audio_128k", "resolution": lbl_128, "type": "audio", "bitrate": 128},
             ]
 
-            # High priority preset formats (4K / Best Video / Audio bitrates)
+            best_sz = format_size(formats_list[0]["filesize"]) if formats_list and formats_list[0].get("filesize") else ""
+            best_label = f"🔥 Best Available Quality (Up to 4K){' (' + best_sz + ')' if best_sz else ''}"
+
             result_formats = [
-                {"format_id": "bestvideo+bestaudio/best", "resolution": "🔥 Best Available Quality (Up to 4K)", "type": "video"}
+                {"format_id": "bestvideo+bestaudio/best", "resolution": best_label, "type": "video"}
             ] + formats_list + audio_formats
 
             return {
@@ -175,6 +221,22 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
     url = clean_youtube_url(url)
 
     def progress_hook(d):
+        import time
+        from backend.jobs.manager import is_paused, is_cancelled
+
+        if is_cancelled(job_id):
+            raise yt_dlp.utils.DownloadError("Download cancelled by user")
+
+        while is_paused(job_id):
+            if is_cancelled(job_id):
+                raise yt_dlp.utils.DownloadError("Download cancelled by user")
+            progress_tracker.update_job(job_id, {
+                "status": "paused",
+                "speed": "Paused",
+                "eta": "--:--"
+            })
+            time.sleep(0.5)
+
         if d.get("status") == "downloading":
             total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             downloaded_bytes = d.get("downloaded_bytes") or 0
@@ -233,11 +295,8 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
         "no_warnings": True,
         "noplaylist": True,
         "socket_timeout": 20,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "ios", "mweb", "web"]
-            }
-        },
+        "js_runtimes": {"node": {}},
+        "format_sort": ["res", "fps", "codec", "size", "br"],
         
         # Resume download & retry optimizations
         "continuedl": True,

@@ -172,6 +172,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "PAUSE_JOB") {
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`${BACKEND_URL}/api/pause/${request.jobId}`, { method: "POST", headers });
+        const data = await res.json();
+        sendResponse({ success: res.ok, data });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  if (request.action === "RESUME_JOB") {
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        const res = await fetch(`${BACKEND_URL}/api/resume/${request.jobId}`, { method: "POST", headers });
+        const data = await res.json();
+        sendResponse({ success: res.ok, data });
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
   if (request.action === "GET_JOB_STATUS") {
     (async () => {
       try {

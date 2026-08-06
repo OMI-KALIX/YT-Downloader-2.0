@@ -12,22 +12,49 @@ from backend.progress.tracker import progress_tracker
 
 logger = logging.getLogger("yt_backend")
 
-# Active cancellation set
+# Active cancellation and pause sets
 _cancelled_jobs = set()
 _cancelled_lock = threading.Lock()
+
+_paused_jobs = set()
+_paused_lock = threading.Lock()
 
 def cancel_job(job_id: str) -> bool:
     with _cancelled_lock:
         _cancelled_jobs.add(job_id)
+    with _paused_lock:
+        _paused_jobs.discard(job_id)
     job = progress_tracker.get_job(job_id)
     if job:
-        progress_tracker.update_job(job_id, {"status": "cancelled", "error": "User cancelled download"})
+        progress_tracker.update_job(job_id, {"status": "cancelled", "speed": "Cancelled", "error": "User cancelled download"})
         return True
     return False
 
 def is_cancelled(job_id: str) -> bool:
     with _cancelled_lock:
         return job_id in _cancelled_jobs
+
+def pause_job(job_id: str) -> bool:
+    with _paused_lock:
+        _paused_jobs.add(job_id)
+    job = progress_tracker.get_job(job_id)
+    if job:
+        progress_tracker.update_job(job_id, {"status": "paused", "speed": "Paused", "eta": "--:--"})
+        return True
+    return False
+
+def resume_job(job_id: str) -> bool:
+    with _paused_lock:
+        _paused_jobs.discard(job_id)
+    job = progress_tracker.get_job(job_id)
+    if job:
+        progress_tracker.update_job(job_id, {"status": "downloading", "speed": "Resuming..."})
+        return True
+    return False
+
+def is_paused(job_id: str) -> bool:
+    with _paused_lock:
+        return job_id in _paused_jobs
 
 def process_download_job(job_id: str, url: str, format_id: str, cookie_content: Optional[str] = None, delay_seconds: int = 0):
     """

@@ -22,6 +22,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const progressEta = document.getElementById("progress-eta");
   const statusError = document.getElementById("status-error");
 
+  const jobControls = document.getElementById("job-controls");
+  const pauseBtn = document.getElementById("pause-btn");
+  const resumeBtn = document.getElementById("resume-btn");
+  const cancelBtn = document.getElementById("cancel-btn");
+
   const historyList = document.getElementById("history-list");
   const clearHistoryBtn = document.getElementById("clear-history-btn");
 
@@ -31,6 +36,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let currentTabUrl = "";
   let isPlaylistUrl = false;
+  let activeJobId = null;
 
   // Load saved settings & quality preference
   chrome.storage.local.get(["backendUrl", "apiKey", "qualityPref"], (res) => {
@@ -196,6 +202,10 @@ document.addEventListener("DOMContentLoaded", () => {
           downloadBtn.disabled = false;
           downloadBtn.innerHTML = "<span>Download Now</span>";
         } else {
+          if (res.jobId) activeJobId = res.jobId;
+          jobControls.classList.remove("hidden");
+          pauseBtn.classList.remove("hidden");
+          resumeBtn.classList.add("hidden");
           saveToHistory({
             title: titleEl.textContent,
             url: currentTabUrl,
@@ -208,6 +218,42 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   });
 
+  pauseBtn.addEventListener("click", () => {
+    if (!activeJobId) return;
+    chrome.runtime.sendMessage({ action: "PAUSE_JOB", jobId: activeJobId }, (res) => {
+      if (res && res.success) {
+        pauseBtn.classList.add("hidden");
+        resumeBtn.classList.remove("hidden");
+        progressStatus.textContent = "PAUSED";
+      }
+    });
+  });
+
+  resumeBtn.addEventListener("click", () => {
+    if (!activeJobId) return;
+    chrome.runtime.sendMessage({ action: "RESUME_JOB", jobId: activeJobId }, (res) => {
+      if (res && res.success) {
+        resumeBtn.classList.add("hidden");
+        pauseBtn.classList.remove("hidden");
+        progressStatus.textContent = "RESUMING...";
+      }
+    });
+  });
+
+  cancelBtn.addEventListener("click", () => {
+    if (!activeJobId) return;
+    chrome.runtime.sendMessage({ action: "CANCEL_JOB", jobId: activeJobId }, (res) => {
+      if (res && res.success) {
+        jobControls.classList.add("hidden");
+        progressStatus.textContent = "CANCELLED";
+        showError("Download cancelled.");
+        downloadBtn.disabled = false;
+        downloadBtn.innerHTML = "<span>Download Now</span>";
+        updateHistoryItem(currentTabUrl, "cancelled");
+      }
+    });
+  });
+
   // Messages listener
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.action === "BACKEND_STATUS_UPDATE") {
@@ -216,12 +262,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (msg.action === "JOB_PROGRESS_UPDATE" && msg.job) {
       const job = msg.job;
+      if (job.id) activeJobId = job.id;
       progressSection.style.display = "block";
       progressStatus.textContent = (job.status || "Downloading").toUpperCase();
       progressPercent.textContent = `${job.percent || 0}%`;
       progressFill.style.width = `${job.percent || 0}%`;
       progressSpeed.textContent = job.speed || "0 MB/s";
       progressEta.textContent = `ETA: ${job.eta || "--"}`;
+
+      if (["downloading", "starting", "scheduled", "paused", "processing"].includes(job.status)) {
+        jobControls.classList.remove("hidden");
+        if (job.status === "paused") {
+          pauseBtn.classList.add("hidden");
+          resumeBtn.classList.remove("hidden");
+        } else {
+          pauseBtn.classList.remove("hidden");
+          resumeBtn.classList.add("hidden");
+        }
+      } else {
+        jobControls.classList.add("hidden");
+      }
 
       if (job.status === "completed") {
         downloadBtn.disabled = false;
@@ -233,6 +293,11 @@ document.addEventListener("DOMContentLoaded", () => {
         downloadBtn.disabled = false;
         downloadBtn.innerHTML = "<span>Retry Download</span>";
         updateHistoryItem(currentTabUrl, "failed");
+      } else if (job.status === "cancelled") {
+        showError("Download cancelled.");
+        downloadBtn.disabled = false;
+        downloadBtn.innerHTML = "<span>Download Now</span>";
+        updateHistoryItem(currentTabUrl, "cancelled");
       }
     }
   });
