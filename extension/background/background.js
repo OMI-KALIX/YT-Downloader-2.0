@@ -220,14 +220,23 @@ function trackDownloadProgress(jobId) {
       if (data.status === "completed") {
         isFinished = true;
         ws.close();
-        if (data.file_path || data.filename) {
+        if (!data.is_batch && (data.file_path || data.filename)) {
           const fileUrl = `${BACKEND_URL}/api/file/${jobId}`;
           const cleanName = sanitizeFilename(data.filename);
           chrome.downloads.download({
             url: fileUrl,
             filename: cleanName,
             saveAs: true
+          }, (downloadId) => {
+            if (chrome.runtime.lastError) {
+              console.error("[AnyDownloader] Chrome download failed:", chrome.runtime.lastError.message);
+            } else {
+              console.log(`[AnyDownloader] Chrome download started with ID: ${downloadId}`);
+            }
           });
+        } else if (data.is_batch && data.sub_jobs) {
+          // Trigger download for each sub job
+          data.sub_jobs.forEach(subId => trackDownloadProgress(subId));
         }
       } else if (data.status === "failed" || data.status === "cancelled") {
         isFinished = true;
@@ -266,14 +275,20 @@ async function pollDownloadProgress(jobId) {
 
       if (data.status === "completed") {
         clearInterval(interval);
-        if (data.file_path || data.filename) {
+        if (!data.is_batch && (data.file_path || data.filename)) {
           const fileUrl = `${BACKEND_URL}/api/file/${jobId}`;
           const cleanName = sanitizeFilename(data.filename);
           chrome.downloads.download({
             url: fileUrl,
             filename: cleanName,
             saveAs: true
+          }, (downloadId) => {
+            if (chrome.runtime.lastError) {
+              console.error("[AnyDownloader] Chrome download failed:", chrome.runtime.lastError.message);
+            }
           });
+        } else if (data.is_batch && data.sub_jobs) {
+          data.sub_jobs.forEach(subId => trackDownloadProgress(subId));
         }
       } else if (data.status === "failed" || data.status === "cancelled") {
         clearInterval(interval);
@@ -283,4 +298,5 @@ async function pollDownloadProgress(jobId) {
     }
   }, 1000);
 }
+
 

@@ -29,11 +29,21 @@ def fetch_oembed_metadata(url: str) -> Optional[Dict[str, Any]]:
         logger.warning(f"oEmbed metadata fallback failed for {url}: {e}")
     return None
 
+def clean_youtube_url(url: str) -> str:
+    """
+    Strips radio mix / auto-generated list parameters from single watch URLs
+    to prevent yt-dlp format extraction failures.
+    """
+    if "watch?v=" in url and "&list=" in url:
+        return url.split("&list=")[0]
+    return url
+
 def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Extracts video metadata and list of available quality options (formats up to 4K & 320kbps audio).
     Includes automatic keyless oEmbed API fallback for instant metadata loading.
     """
+    url = clean_youtube_url(url)
     ydl_opts = {
         "quiet": True,
         "no_warnings": True,
@@ -41,11 +51,7 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
         "noplaylist": True,
         "extractor_args": {
             "youtube": {
-                "player_client": ["mweb", "ios", "android", "web"],
-                "skip": ["authcheck"]
-            },
-            "youtubetab": {
-                "skip": ["authcheck"]
+                "player_client": ["android", "ios", "mweb", "web"]
             }
         }
     }
@@ -55,6 +61,7 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+
             
             formats_list = []
             if "formats" in info:
@@ -155,6 +162,8 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
     Downloads media using yt-dlp with parallel fragment concurrency, resume download support,
     configurable audio bitrate (320, 192, 128 kbps), and FFmpeg stream merging.
     """
+    url = clean_youtube_url(url)
+
     def progress_hook(d):
         if d.get("status") == "downloading":
             total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
@@ -216,11 +225,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
         "socket_timeout": 20,
         "extractor_args": {
             "youtube": {
-                "player_client": ["mweb", "ios", "android", "web"],
-                "skip": ["authcheck"]
-            },
-            "youtubetab": {
-                "skip": ["authcheck"]
+                "player_client": ["android", "ios", "mweb", "web"]
             }
         },
         

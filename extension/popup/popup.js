@@ -155,7 +155,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!tabs || !tabs[0]) return;
     const tab = tabs[0];
     currentTabUrl = tab.url || "";
-    isPlaylistUrl = currentTabUrl.includes("list=") || currentTabUrl.includes("/playlist");
+    // Only treat as playlist if it's a playlist page or list parameter without a single watch video
+    isPlaylistUrl = currentTabUrl.includes("/playlist") || (currentTabUrl.includes("list=") && !currentTabUrl.includes("watch?v="));
 
     if (currentTabUrl.includes("youtube.com")) {
       titleEl.textContent = tab.title ? tab.title.replace("- YouTube", "").trim() : "YouTube Video";
