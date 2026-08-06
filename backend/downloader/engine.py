@@ -1,7 +1,7 @@
 import os
 import tempfile
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import yt_dlp
 
 from backend.progress.tracker import progress_tracker
@@ -14,9 +14,48 @@ class BotCheckError(yt_dlp.utils.DownloadError):
     """Raised when all player clients hit YouTube's bot-verification challenge."""
     pass
 
+class FormatNotAvailableError(yt_dlp.utils.DownloadError):
+    """Raised when requested format is not available and all fallbacks fail."""
+    pass
+
 def is_bot_check_error(err: Exception) -> bool:
     msg = str(err).lower()
     return "confirm you're not a bot" in msg or "confirm you’re not a bot" in msg or "sign in to confirm" in msg or "bot check" in msg
+
+def is_format_not_available_error(err: Exception) -> bool:
+    msg = str(err).lower()
+    return "requested format is not available" in msg or "format is not available" in msg
+
+def resolve_format_spec(format_id: str) -> Tuple[str, bool, str]:
+    """
+    Resolves incoming format_id strings (synthetic labels, quality choices, or itags)
+    into valid yt-dlp selector expressions, returning (format_spec, is_audio, audio_bitrate).
+    """
+    if not format_id:
+        return ("bestvideo+bestaudio/best", False, "320")
+
+    fmt_lower = format_id.lower()
+    is_audio = (
+        fmt_lower.startswith("audio_")
+        or fmt_lower in ["mp3", "audio", "bestaudio"]
+        or ("bestaudio" in fmt_lower and "bestvideo" not in fmt_lower)
+    )
+
+    if is_audio:
+        if "128" in fmt_lower:
+            return ("bestaudio[abr<=128]/bestaudio/best", True, "128")
+        elif "192" in fmt_lower:
+            return ("bestaudio[abr<=192]/bestaudio/best", True, "192")
+        else:
+            return ("bestaudio[abr<=320]/bestaudio/best", True, "320")
+
+    if "/" in format_id or "+" in format_id or "height" in format_id:
+        return (f"{format_id}/bestvideo+bestaudio/best", False, "320")
+
+    if format_id.isdigit():
+        return (f"{format_id}+bestaudio/bestvideo+bestaudio/best", False, "320")
+
+    return (f"{format_id}/bestvideo+bestaudio/best", False, "320")
 
 def get_env_ydl_opts() -> Dict[str, Any]:
     opts: Dict[str, Any] = {}
@@ -339,16 +378,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
 
     output_template = os.path.join(output_dir, "%(id)s.%(ext)s")
 
-    is_audio = format_id.startswith("audio_") or format_id in ["bestaudio/best", "bestaudio"]
-    
-    # Determine audio bitrate quality (320, 192, 128 kbps)
-    audio_bitrate = "320"
-    if "128" in format_id:
-        audio_bitrate = "128"
-    elif "192" in format_id:
-        audio_bitrate = "192"
-    elif "320" in format_id:
-        audio_bitrate = "320"
+    format_spec, is_audio, audio_bitrate = resolve_format_spec(format_id)
 
     base_ydl_opts: Dict[str, Any] = {
         "outtmpl": output_template,
@@ -374,7 +404,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
 
     if is_audio:
         base_ydl_opts.update({
-            "format": "bestaudio/best",
+            "format": format_spec,
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
@@ -382,17 +412,15 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
             }]
         })
     else:
-        target_fmt = format_id if format_id else "bestvideo+bestaudio/best"
-        target_fmt = f"{target_fmt}/bestvideo+bestaudio/best"
         base_ydl_opts.update({
-            "format": target_fmt,
+            "format": format_spec,
             "merge_output_format": "mp4",
         })
 
     if cookie_path and os.path.exists(cookie_path):
         base_ydl_opts["cookiefile"] = cookie_path
 
-    logger.info(f"Starting optimized yt-dlp download for job {job_id} [format: {format_id}]")
+    logger.info(f"Starting optimized yt-dlp download for job {job_id} [format_id: {format_id} -> format_spec: {format_spec}]")
     
     def resolve_downloaded_file(info_dict: dict) -> str:
         raw_title = info_dict.get("title", "downloaded_media")
@@ -419,6 +447,34 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
         fallback_name = os.path.join(output_dir, f"{clean_title}.mp3" if is_audio else f"{clean_title}.mp4")
         return fallback_name
 
+    def attempt_download_with_opts(opts: dict) -> str:
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                return resolve_downloaded_file(info)
+        except Exception as e:
+            if is_format_not_available_error(e):
+                logger.warning(f"Format spec '{opts.get('format')}' unavailable for {url}. Executing format staleness fallback...")
+                fallback_opts = dict(opts)
+                fallback_opts["format"] = "bestaudio/best" if is_audio else "bestvideo+bestaudio/best"
+                try:
+                    with yt_dlp.YoutubeDL(fallback_opts) as ydl_fb:
+                        info_fb = ydl_fb.extract_info(url, download=True)
+                        return resolve_downloaded_file(info_fb)
+                except Exception as e_fb:
+                    if is_format_not_available_error(e_fb):
+                        try:
+                            probe_opts = {"quiet": True, "js_runtimes": {"node": {}}}
+                            with yt_dlp.YoutubeDL(probe_opts) as ydl_p:
+                                p_info = ydl_p.extract_info(url, download=False)
+                                fmts = [f.get("format_id") for f in p_info.get("formats", [])]
+                                logger.error(f"FormatNotAvailable for video {url}. Available format_ids server-side: {fmts}")
+                        except Exception:
+                            pass
+                        raise FormatNotAvailableError("The requested video format is currently unavailable. Please select a different quality option.")
+                    raise e_fb
+            raise e
+
     last_error = None
     for client in FALLBACK_CLIENTS:
         ydl_opts = dict(base_ydl_opts)
@@ -428,9 +484,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
             ydl_opts["extractor_args"] = {"youtube": {"player_client": ["ios", "mweb"]}}
 
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                return resolve_downloaded_file(info)
+            return attempt_download_with_opts(ydl_opts)
         except Exception as e:
             last_error = e
             if is_bot_check_error(e):
@@ -440,20 +494,19 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
                     opts_no_cookie = dict(ydl_opts)
                     opts_no_cookie.pop("cookiefile", None)
                     try:
-                        with yt_dlp.YoutubeDL(opts_no_cookie) as ydl:
-                            info = ydl.extract_info(url, download=True)
-                            return resolve_downloaded_file(info)
+                        return attempt_download_with_opts(opts_no_cookie)
                     except Exception as e2:
                         last_error = e2
                         if not is_bot_check_error(e2):
                             raise e2
                 continue
             else:
-                # Non-bot check error (e.g. private video, deleted, invalid URL) -> fail fast
                 raise e
 
     if last_error and is_bot_check_error(last_error):
         raise BotCheckError("This video's source is temporarily blocking automated downloads — please try again in a few minutes.")
+    if last_error and is_format_not_available_error(last_error):
+        raise FormatNotAvailableError("The requested video format is currently unavailable. Please select a different quality option.")
     raise last_error or RuntimeError("Download failed")
 
 

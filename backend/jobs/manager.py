@@ -7,7 +7,7 @@ import logging
 from typing import Optional, List, Dict, Any
 
 from backend.cookies.manager import temporary_cookie_file
-from backend.downloader.engine import download_media, extract_playlist_items, cleanup_expired_partials, BotCheckError
+from backend.downloader.engine import download_media, extract_playlist_items, cleanup_expired_partials, BotCheckError, FormatNotAvailableError
 from backend.progress.tracker import progress_tracker
 
 logger = logging.getLogger("yt_backend")
@@ -108,6 +108,14 @@ def process_download_job(job_id: str, url: str, format_id: str, cookie_content: 
                 "status": "failed",
                 "error_code": "SOURCE_BOT_CHECK_FAILED",
                 "error": "This video's source is temporarily blocking automated downloads — please try again in a few minutes."
+            })
+    except FormatNotAvailableError as e:
+        if not is_cancelled(job_id):
+            logger.warning(f"Job {job_id} format unavailable: {e}")
+            progress_tracker.update_job(job_id, {
+                "status": "failed",
+                "error_code": "FORMAT_NOT_AVAILABLE",
+                "error": "The requested video format is currently unavailable. Please try selecting a different quality option."
             })
     except Exception as e:
         if not is_cancelled(job_id):

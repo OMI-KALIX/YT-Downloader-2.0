@@ -148,3 +148,31 @@ def test_cookie_diagnostics_and_bot_check_mapping():
     assert opts.get("proxy") == "http://127.0.0.1:8080"
     os.environ.pop("YTDLP_SLEEP_REQUESTS", None)
     os.environ.pop("YTDLP_PROXY", None)
+
+def test_resolve_format_spec_and_format_error():
+    from backend.downloader.engine import resolve_format_spec, is_format_not_available_error, FormatNotAvailableError
+
+    # Test audio resolution mapping
+    spec1, is_aud1, br1 = resolve_format_spec("audio_128k")
+    assert "bestaudio[abr<=128]" in spec1
+    assert is_aud1 is True
+    assert br1 == "128"
+
+    spec2, is_aud2, br2 = resolve_format_spec("audio_320k")
+    assert "bestaudio[abr<=320]" in spec2
+    assert is_aud2 is True
+    assert br2 == "320"
+
+    # Test video resolution mapping
+    spec3, is_aud3, _ = resolve_format_spec("bestvideo[height<=1080]+bestaudio/best")
+    assert "bestvideo[height<=1080]" in spec3
+    assert is_aud3 is False
+
+    # Test itag mapping
+    spec4, is_aud4, _ = resolve_format_spec("137+140")
+    assert "137+140" in spec4
+    assert is_aud4 is False
+
+    # Test format error checker
+    err = Exception("yt_dlp.utils.ExtractorError: [youtube] Requested format is not available. Use --list-formats for a list")
+    assert is_format_not_available_error(err) is True
