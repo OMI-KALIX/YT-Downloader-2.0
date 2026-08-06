@@ -27,11 +27,11 @@ RUN yt-dlp --remote-components ejs:github --version || true
 # Copy backend source code
 COPY backend /app/backend
 
-# Expose port
-EXPOSE 8000
+# Expose port (default 8000, Hugging Face uses 7860, Railway uses dynamic PORT)
+EXPOSE 8000 7860
 
 # Set Python path to include /app so modules inside backend import cleanly
 ENV PYTHONPATH=/app
 
-# Command to run FastAPI server with Uvicorn
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Command to run FastAPI server with Uvicorn (binds to $PORT if set, else 8000)
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

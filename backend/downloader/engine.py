@@ -162,6 +162,14 @@ def log_format_diagnostics(url: str, cookie_path: Optional[str] = None) -> None:
 
 def get_env_ydl_opts() -> Dict[str, Any]:
     opts: Dict[str, Any] = {}
+
+    try:
+        from desktop.path_resolver import get_ffmpeg_path
+        bin_dir = get_ffmpeg_path()
+        if bin_dir and os.path.exists(bin_dir):
+            opts["ffmpeg_location"] = bin_dir
+    except Exception as e:
+        logger.debug(f"Could not load ffmpeg_location from desktop.path_resolver: {e}")
     
     if os.environ.get("YTDLP_SLEEP_REQUESTS"):
         try:
@@ -192,6 +200,7 @@ def get_env_ydl_opts() -> Dict[str, Any]:
         opts["proxy"] = os.environ["YTDLP_PROXY"]
 
     return opts
+
 
 def fetch_oembed_metadata(url: str) -> Optional[Dict[str, Any]]:
     """

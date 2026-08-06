@@ -29,3 +29,7 @@ ENV/
 .vscode/
 temp/
 yt_dl_*
+bin/
+*.zip
+.pytest_cache/
+run.log
