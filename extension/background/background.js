@@ -122,6 +122,61 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "START_CLIENT_DOWNLOAD") {
+    const filename = `${sanitizeFilename(request.title || "youtube_video")}.mp4`;
+    console.log(`[AnyDownloader] Starting direct client-side browser download for ${filename}`);
+    chrome.downloads.download(
+      {
+        url: request.url,
+        filename: filename,
+        saveAs: false
+      },
+      (downloadId) => {
+        if (chrome.runtime.lastError) {
+          console.error("Client download failed:", chrome.runtime.lastError);
+          sendResponse({ success: false, error: chrome.runtime.lastError.message });
+        } else {
+          sendResponse({ success: true, downloadId });
+        }
+      }
+    );
+    return true;
+  }
+
+  if (request.action === "START_MUX_DOWNLOAD") {
+    (async () => {
+      try {
+        const headers = await getAuthHeaders();
+        console.log(`[AnyDownloader] Posting direct stream URLs to /api/mux [video: ${Boolean(request.video_url)}, audio: ${Boolean(request.audio_url)}]`);
+        const res = await fetch(`${BACKEND_URL}/api/mux`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            video_url: request.video_url,
+            audio_url: request.audio_url,
+            title: request.title,
+            format_id: request.format_id
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          sendResponse({ success: false, error: data.detail || "Direct stream mux request rejected" });
+          return;
+        }
+
+        if (data.job_id) {
+          sendResponse({ success: true, jobId: data.job_id });
+          trackDownloadProgress(data.job_id);
+        } else {
+          sendResponse({ success: false, error: "No job ID returned for mux request" });
+        }
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
   if (request.action === "START_DOWNLOAD" || request.action === "START_BATCH_DOWNLOAD") {
     (async () => {
       try {

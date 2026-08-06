@@ -26,6 +26,10 @@ class RateLimit429Error(yt_dlp.utils.DownloadError):
     """Raised when YouTube responds with HTTP 429 Too Many Requests."""
     pass
 
+class CDNUrlExpiredError(Exception):
+    """Raised when client-resolved video or audio CDN stream URL returns HTTP 403 or 410."""
+    pass
+
 def is_bot_check_error(err: Exception) -> bool:
     msg = str(err).lower()
     return "confirm you're not a bot" in msg or "confirm you’re not a bot" in msg or "sign in to confirm" in msg or "bot check" in msg
@@ -734,4 +738,94 @@ def cleanup_expired_partials(retention_seconds: int = 3600):
                         logger.info(f"Purged expired partial download folder: {full_path}")
     except Exception as e:
         logger.warning(f"Error during partial download cleanup sweep: {e}")
+
+def download_and_mux_streams(
+    job_id: str,
+    video_url: Optional[str] = None,
+    audio_url: Optional[str] = None,
+    title: Optional[str] = None,
+    output_dir: str = ""
+) -> str:
+    """
+    Downloads direct CDN media streams concurrently via HTTP and merges them using FFmpeg.
+    Bypasses server-side yt-dlp YouTube extraction entirely.
+    """
+    import urllib.request
+    import urllib.error
+    import subprocess
+    import shutil
+
+    clean_title = sanitize_filename(title or "youtube_download")
+    out_ext = ".mp3" if (not video_url and audio_url) else ".mp4"
+    out_path = os.path.join(output_dir, f"{clean_title}{out_ext}")
+
+    video_file = os.path.join(output_dir, "v_stream.tmp") if video_url else None
+    audio_file = os.path.join(output_dir, "a_stream.tmp") if audio_url else None
+
+    def fetch_stream(url_str: str, dst_path: str, label: str):
+        req = urllib.request.Request(url_str, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "*/*",
+            "Accept-Encoding": "identity",
+            "Referer": "https://www.youtube.com/"
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                if resp.status in (403, 410):
+                    raise CDNUrlExpiredError(f"HTTP {resp.status} link expired for {label}")
+                total = int(resp.headers.get("Content-Length", 0))
+                downloaded = 0
+                with open(dst_path, "wb") as f:
+                    while True:
+                        chunk = resp.read(64 * 1024)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total > 0:
+                            pct = round((downloaded / total) * 80.0, 1)
+                            progress_tracker.update_job(job_id, {
+                                "status": "downloading",
+                                "percent": pct,
+                                "speed": f"Streaming {label}...",
+                                "eta": "--:--"
+                            })
+        except urllib.error.HTTPError as he:
+            if he.code in (403, 410):
+                raise CDNUrlExpiredError(f"HTTP {he.code} link expired for {label}")
+            raise
+
+    logger.info(f"Starting direct stream download for job {job_id} [{clean_title}]")
+    progress_tracker.update_job(job_id, {"status": "starting", "percent": 5.0})
+
+    if video_url:
+        fetch_stream(video_url, video_file, "video")
+    if audio_url:
+        fetch_stream(audio_url, audio_file, "audio")
+
+    progress_tracker.update_job(job_id, {"status": "processing", "percent": 85.0, "speed": "Muxing streams with FFmpeg..."})
+
+    # FFmpeg Muxing execution
+    ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
+    cmd = [ffmpeg_bin, "-y"]
+
+    if video_file and os.path.exists(video_file):
+        cmd.extend(["-i", video_file])
+    if audio_file and os.path.exists(audio_file):
+        cmd.extend(["-i", audio_file])
+
+    if video_file and audio_file:
+        cmd.extend(["-c:v", "copy", "-c:a", "aac", out_path])
+    elif video_file:
+        cmd.extend(["-c", "copy", out_path])
+    elif audio_file:
+        cmd.extend(["-vn", "-c:a", "libmp3lame", "-q:a", "2", out_path])
+
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if proc.returncode != 0:
+        logger.error(f"FFmpeg muxing failed: {proc.stderr}")
+        raise RuntimeError(f"FFmpeg stream muxing failed: {proc.stderr[:200]}")
+
+    logger.info(f"Direct stream muxing completed for job {job_id}: {out_path}")
+    return out_path
 

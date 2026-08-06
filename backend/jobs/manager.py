@@ -7,7 +7,16 @@ import logging
 from typing import Optional, List, Dict, Any
 
 from backend.cookies.manager import temporary_cookie_file
-from backend.downloader.engine import download_media, extract_playlist_items, cleanup_expired_partials, BotCheckError, FormatNotAvailableError, RateLimit429Error
+from backend.downloader.engine import (
+    download_media,
+    extract_playlist_items,
+    cleanup_expired_partials,
+    download_and_mux_streams,
+    BotCheckError,
+    FormatNotAvailableError,
+    RateLimit429Error,
+    CDNUrlExpiredError
+)
 from backend.progress.tracker import progress_tracker
 
 logger = logging.getLogger("yt_backend")
@@ -236,3 +245,77 @@ def _start_retention_cleanup_sweep():
     t.start()
 
 _start_retention_cleanup_sweep()
+
+def process_mux_job(
+    job_id: str,
+    video_url: Optional[str] = None,
+    audio_url: Optional[str] = None,
+    title: Optional[str] = None,
+    format_id: Optional[str] = None
+):
+    output_dir = tempfile.mkdtemp(prefix="yt_dl_mux_")
+    try:
+        if is_cancelled(job_id):
+            progress_tracker.update_job(job_id, {"status": "cancelled"})
+            return
+
+        file_path = download_and_mux_streams(
+            job_id=job_id,
+            video_url=video_url,
+            audio_url=audio_url,
+            title=title,
+            output_dir=output_dir
+        )
+
+        if is_cancelled(job_id):
+            progress_tracker.update_job(job_id, {"status": "cancelled"})
+            return
+
+        if os.path.exists(file_path):
+            filename = os.path.basename(file_path)
+            file_size = os.path.getsize(file_path)
+            progress_tracker.update_job(job_id, {
+                "status": "completed",
+                "percent": 100.0,
+                "file_path": file_path,
+                "filename": filename,
+                "file_size": file_size,
+                "speed": "Completed",
+                "eta": "00:00"
+            })
+        else:
+            raise FileNotFoundError(f"Muxed output file not found at {file_path}")
+
+    except CDNUrlExpiredError as e:
+        if not is_cancelled(job_id):
+            logger.warning(f"Job {job_id} CDN link expired: {e}")
+            progress_tracker.update_job(job_id, {
+                "status": "failed",
+                "error_code": "CDN_URL_EXPIRED",
+                "error": "The video stream link has expired. Please refresh the YouTube page and try downloading again."
+            })
+    except Exception as e:
+        if not is_cancelled(job_id):
+            logger.error(f"Job {job_id} muxing failed: {e}", exc_info=True)
+            progress_tracker.update_job(job_id, {
+                "status": "failed",
+                "error_code": "MUXING_FAILED",
+                "error": str(e)
+            })
+
+def start_mux_job(
+    video_url: Optional[str] = None,
+    audio_url: Optional[str] = None,
+    title: Optional[str] = None,
+    format_id: Optional[str] = None
+) -> str:
+    job_id = str(uuid.uuid4())
+    progress_tracker.create_job(job_id, title or "YouTube Media Stream")
+    
+    thread = threading.Thread(
+        target=process_mux_job,
+        args=(job_id, video_url, audio_url, title, format_id),
+        daemon=True
+    )
+    thread.start()
+    return job_id

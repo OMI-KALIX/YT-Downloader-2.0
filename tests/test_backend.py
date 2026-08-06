@@ -204,3 +204,19 @@ def test_rate_limit_429_and_caching():
     video_cooldown_tracker.check_and_update(vid_key)
     wait = video_cooldown_tracker.check_and_update(vid_key)
     assert wait > 0.0
+
+def test_mux_endpoint_and_cdn_expired_error():
+    from backend.downloader.engine import CDNUrlExpiredError
+    from fastapi.testclient import TestClient
+    from backend.main import app
+
+    client = TestClient(app)
+    
+    # Test POST /api/mux invalid payload
+    resp = client.post("/api/mux", json={})
+    assert resp.status_code == 400
+    assert "At least one media stream URL" in resp.json()["detail"]
+
+    # Test CDNUrlExpiredError message formatting
+    err = CDNUrlExpiredError("HTTP 403 link expired for video")
+    assert "HTTP 403" in str(err)

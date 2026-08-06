@@ -9,7 +9,7 @@ from pydantic import BaseModel, HttpUrl
 
 from backend.downloader.engine import get_video_formats
 from backend.cookies.manager import temporary_cookie_file
-from backend.jobs.manager import start_download_job, start_batch_job, cancel_job, pause_job, resume_job
+from backend.jobs.manager import start_download_job, start_batch_job, start_mux_job, cancel_job, pause_job, resume_job
 from backend.progress.tracker import progress_tracker
 
 logger = logging.getLogger("yt_backend")
@@ -60,6 +60,12 @@ class BatchRequest(BaseModel):
     cookies: Optional[str] = None
     max_items: int = 25
     delay_seconds: int = 0
+
+class MuxRequest(BaseModel):
+    video_url: Optional[str] = None
+    audio_url: Optional[str] = None
+    title: Optional[str] = None
+    format_id: Optional[str] = None
 
 @router.get("/health")
 def health_check():
@@ -117,6 +123,27 @@ def request_batch_download(req: BatchRequest, request: Request, x_api_key: Optio
         return {"status": "started", "job_id": parent_job_id, "is_batch": True}
     except Exception as e:
         logger.error(f"Error starting batch download: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/mux")
+def request_mux_download(req: MuxRequest, request: Request, x_api_key: Optional[str] = Header(None)):
+    verify_api_key(x_api_key)
+    client_ip = request.client.host if request.client else "unknown"
+    enforce_rate_limit(client_ip)
+
+    if not req.video_url and not req.audio_url:
+        raise HTTPException(status_code=400, detail="At least one media stream URL (video_url or audio_url) must be provided.")
+
+    try:
+        job_id = start_mux_job(
+            video_url=req.video_url,
+            audio_url=req.audio_url,
+            title=req.title,
+            format_id=req.format_id
+        )
+        return {"status": "started", "job_id": job_id}
+    except Exception as e:
+        logger.error(f"Error initiating direct stream mux job: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/cancel/{job_id}")
