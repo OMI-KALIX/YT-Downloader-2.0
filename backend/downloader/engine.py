@@ -58,11 +58,9 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
     if cookie_path and os.path.exists(cookie_path):
         ydl_opts["cookiefile"] = cookie_path
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    def extract_with_opts(opts):
+        with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
-
-            
             formats_list = []
             if "formats" in info:
                 seen_res = set()
@@ -98,9 +96,8 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
                         formats_list.append({
                             "format_id": f"bestvideo[height<={height}]+bestaudio/best[height<={height}]",
                             "resolution": label,
-                            "ext": "mp4",
-                            "height": height,
-                            "type": "video"
+                            "type": "video",
+                            "height": height
                         })
                 
                 # Sort by height descending
@@ -126,8 +123,21 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
                 "uploader": info.get("uploader"),
                 "formats": result_formats
             }
+
+    try:
+        return extract_with_opts(ydl_opts)
     except Exception as e:
-        logger.warning(f"yt-dlp format extraction failed: {e}. Attempting oEmbed fallback...")
+        if "cookiefile" in ydl_opts:
+            logger.warning(f"yt-dlp format extraction failed with cookies: {e}. Retrying without cookiefile...")
+            ydl_opts_no_cookie = dict(ydl_opts)
+            ydl_opts_no_cookie.pop("cookiefile", None)
+            try:
+                return extract_with_opts(ydl_opts_no_cookie)
+            except Exception as e2:
+                logger.warning(f"yt-dlp format extraction failed without cookies: {e2}. Attempting oEmbed fallback...")
+        else:
+            logger.warning(f"yt-dlp format extraction failed: {e}. Attempting oEmbed fallback...")
+            
         oembed_data = fetch_oembed_metadata(url)
         if oembed_data:
             fallback_formats = [
@@ -294,14 +304,16 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
             info = ydl.extract_info(url, download=True)
             return resolve_downloaded_file(info)
     except yt_dlp.utils.DownloadError as e:
-        if "Requested format is not available" in str(e):
-            logger.warning(f"Requested format '{format_id}' unavailable for job {job_id}. Attempting resilient fallback download...")
-            fallback_opts = dict(ydl_opts)
-            fallback_opts["format"] = "bestaudio/best/ba/b/140/251/18" if is_audio else "bestvideo+bestaudio/best/18/b/ba"
+        logger.warning(f"yt-dlp download failed for job {job_id}: {e}. Retrying without cookiefile and with resilient format fallback...")
+        fallback_opts = dict(ydl_opts)
+        fallback_opts.pop("cookiefile", None)
+        fallback_opts["format"] = "bestaudio/best/ba/b/140/251/18" if is_audio else "bestvideo+bestaudio/best/18/b/ba"
+        try:
             with yt_dlp.YoutubeDL(fallback_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 return resolve_downloaded_file(info)
-        raise e
+        except Exception:
+            raise e
 
 
 
