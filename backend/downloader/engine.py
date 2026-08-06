@@ -112,6 +112,49 @@ def resolve_format_spec(format_id: str) -> Tuple[str, bool, str]:
 
     return (f"{format_id}/bestvideo+bestaudio/best", False, "320")
 
+def log_format_diagnostics(url: str, cookie_path: Optional[str] = None) -> None:
+    """
+    Diagnostic helper to log available yt-dlp formats and availability metadata
+    when a format extraction/download failure occurs.
+    """
+    try:
+        diag_opts: Dict[str, Any] = {
+            "quiet": True,
+            "no_warnings": True,
+            "js_runtimes": {"deno": {}, "node": {}},
+        }
+        if cookie_path and os.path.exists(cookie_path):
+            diag_opts["cookiefile"] = cookie_path
+
+        with yt_dlp.YoutubeDL(diag_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            formats = info.get("formats", [])
+            availability = info.get("availability")
+            live_status = info.get("live_status")
+            
+            logger.info(f"=== DIAGNOSTICS FOR VIDEO {url} ===")
+            logger.info(f"Availability: {availability} | Live Status: {live_status}")
+            
+            if not formats:
+                logger.error("formats list is empty — video may be restricted, region-locked, or removed")
+            else:
+                logger.info(f"Total formats returned: {len(formats)}")
+                for f in formats:
+                    fid = f.get("format_id")
+                    ext = f.get("ext")
+                    vcodec = f.get("vcodec")
+                    acodec = f.get("acodec")
+                    height = f.get("height")
+                    abr = f.get("abr")
+                    has_url = bool(f.get("url"))
+                    logger.info(
+                        f"Format ID: {fid} | Ext: {ext} | VCodec: {vcodec} | ACodec: {acodec} | "
+                        f"Height: {height} | ABR: {abr} | Has URL: {has_url}"
+                    )
+            logger.info(f"=== END DIAGNOSTICS FOR VIDEO {url} ===")
+    except Exception as diag_err:
+        logger.error(f"Failed to log format diagnostics for {url}: {diag_err}")
+
 def get_env_ydl_opts() -> Dict[str, Any]:
     opts: Dict[str, Any] = {}
     
@@ -395,6 +438,9 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
         raise RateLimit429Error("YouTube is temporarily rate-limiting requests — please try again in a few minutes.")
     if last_error and is_bot_check_error(last_error):
         raise BotCheckError("This video's source is temporarily blocking automated downloads — please try again in a few minutes.")
+    if last_error and is_format_not_available_error(last_error):
+        log_format_diagnostics(url, cookie_path)
+        raise FormatNotAvailableError("The requested video format is currently unavailable. Please select a different quality option.")
     raise last_error or RuntimeError("Format extraction failed")
 
 def sanitize_filename(name: str) -> str:
@@ -565,14 +611,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
                     if is_rate_limit_429_error(e_fb):
                         raise RateLimit429Error("YouTube is temporarily rate-limiting requests — please try again in a few minutes.")
                     if is_format_not_available_error(e_fb):
-                        try:
-                            probe_opts = {"quiet": True, "js_runtimes": {"deno": {}, "node": {}}}
-                            with yt_dlp.YoutubeDL(probe_opts) as ydl_p:
-                                p_info = ydl_p.extract_info(url, download=False)
-                                fmts = [f.get("format_id") for f in p_info.get("formats", [])]
-                                logger.error(f"FormatNotAvailable for video {url}. Available format_ids server-side: {fmts}")
-                        except Exception:
-                            pass
+                        log_format_diagnostics(url, cookie_path)
                         raise FormatNotAvailableError("The requested video format is currently unavailable. Please select a different quality option.")
                     raise e_fb
             raise e
