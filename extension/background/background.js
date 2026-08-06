@@ -186,6 +186,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
+function sanitizeFilename(name) {
+  if (!name) return "youtube_download";
+  return name.replace(/[\\/*?:"<>|]/g, "").trim() || "youtube_download";
+}
+
 // Primary tracker: attempts WebSocket connection first, falls back seamlessly to HTTP polling
 function trackDownloadProgress(jobId) {
   let isFinished = false;
@@ -217,9 +222,10 @@ function trackDownloadProgress(jobId) {
         ws.close();
         if (data.file_path || data.filename) {
           const fileUrl = `${BACKEND_URL}/api/file/${jobId}`;
+          const cleanName = sanitizeFilename(data.filename);
           chrome.downloads.download({
             url: fileUrl,
-            filename: data.filename || "youtube_download",
+            filename: cleanName,
             saveAs: true
           });
         }
@@ -262,9 +268,10 @@ async function pollDownloadProgress(jobId) {
         clearInterval(interval);
         if (data.file_path || data.filename) {
           const fileUrl = `${BACKEND_URL}/api/file/${jobId}`;
+          const cleanName = sanitizeFilename(data.filename);
           chrome.downloads.download({
             url: fileUrl,
-            filename: data.filename || "youtube_download",
+            filename: cleanName,
             saveAs: true
           });
         }
@@ -276,3 +283,4 @@ async function pollDownloadProgress(jobId) {
     }
   }, 1000);
 }
+

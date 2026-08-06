@@ -143,6 +143,13 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
             }
         raise e
 
+def sanitize_filename(name: str) -> str:
+    import re
+    if not name:
+        return "youtube_download"
+    clean = re.sub(r'[\\/*?:"<>|]', '', name).strip().strip('.')
+    return clean or "youtube_download"
+
 def download_media(job_id: str, url: str, format_id: str, output_dir: str, cookie_path: Optional[str] = None) -> str:
     """
     Downloads media using yt-dlp with parallel fragment concurrency, resume download support,
@@ -153,16 +160,29 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
             total_bytes = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             downloaded_bytes = d.get("downloaded_bytes") or 0
             
-            percent = (downloaded_bytes / total_bytes * 100) if total_bytes > 0 else 0.0
+            if total_bytes > 0:
+                percent = (downloaded_bytes / total_bytes * 100)
+            elif d.get("fragment_count"):
+                frag_idx = d.get("fragment_index", 0)
+                frag_cnt = d.get("fragment_count", 1)
+                percent = (frag_idx / frag_cnt * 100)
+            else:
+                percent = 10.0
+
             speed_bytes = d.get("speed") or 0
-            speed_str = f"{speed_bytes / 1024 / 1024:.2f} MB/s" if speed_bytes else "0 KB/s"
-            
+            if speed_bytes >= 1024 * 1024:
+                speed_str = f"{speed_bytes / 1024 / 1024:.2f} MB/s"
+            elif speed_bytes > 0:
+                speed_str = f"{speed_bytes / 1024:.1f} KB/s"
+            else:
+                speed_str = "Downloading..."
+
             eta = d.get("eta")
             eta_str = f"{eta}s" if eta is not None else "--:--"
 
             progress_tracker.update_job(job_id, {
                 "status": "downloading",
-                "percent": round(percent, 1),
+                "percent": round(min(percent, 98.9), 1),
                 "speed": speed_str,
                 "eta": eta_str
             })
@@ -170,11 +190,11 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
             progress_tracker.update_job(job_id, {
                 "status": "processing",
                 "percent": 99.0,
-                "speed": "Merging streams...",
+                "speed": "Processing media...",
                 "eta": "0s"
             })
 
-    output_template = os.path.join(output_dir, "%(title)s.%(ext)s")
+    output_template = os.path.join(output_dir, "%(id)s.%(ext)s")
 
     is_audio = format_id == "bestaudio/best" or "audio" in format_id
     
@@ -193,6 +213,7 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "socket_timeout": 20,
         "extractor_args": {
             "youtube": {
                 "player_client": ["mweb", "ios", "android", "web"],
@@ -237,18 +258,37 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
 
     logger.info(f"Starting optimized yt-dlp download for job {job_id} [format: {format_id}]")
     
+    def resolve_downloaded_file(info_dict: dict) -> str:
+        raw_title = info_dict.get("title", "downloaded_media")
+        clean_title = sanitize_filename(raw_title)
+
+        # Look for resulting files in output_dir
+        candidates = [
+            os.path.join(output_dir, f) for f in os.listdir(output_dir)
+            if not f.endswith(".part") and not f.endswith(".ytdl")
+        ]
+        if candidates:
+            candidates.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            chosen = candidates[0]
+            ext = os.path.splitext(chosen)[1]
+            desirable_name = os.path.join(output_dir, f"{clean_title}{ext}")
+            if chosen != desirable_name:
+                try:
+                    os.rename(chosen, desirable_name)
+                    return desirable_name
+                except Exception:
+                    return chosen
+            return chosen
+        
+        fallback_name = ydl.prepare_filename(info_dict)
+        if is_audio:
+            fallback_name = os.path.splitext(fallback_name)[0] + ".mp3"
+        return fallback_name
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            
-            if is_audio:
-                base, _ = os.path.splitext(filename)
-                filename = base + ".mp3"
-            elif not filename.endswith(".mp4") and os.path.exists(os.path.splitext(filename)[0] + ".mp4"):
-                filename = os.path.splitext(filename)[0] + ".mp4"
-
-            return filename
+            return resolve_downloaded_file(info)
     except yt_dlp.utils.DownloadError as e:
         if "Requested format is not available" in str(e):
             logger.warning(f"Requested format '{format_id}' unavailable for job {job_id}. Attempting resilient fallback download...")
@@ -256,14 +296,9 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
             fallback_opts["format"] = "ba/b/best" if is_audio else "bestvideo+bestaudio/best"
             with yt_dlp.YoutubeDL(fallback_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                filename = ydl.prepare_filename(info)
-                if is_audio:
-                    base, _ = os.path.splitext(filename)
-                    filename = base + ".mp3"
-                elif not filename.endswith(".mp4") and os.path.exists(os.path.splitext(filename)[0] + ".mp4"):
-                    filename = os.path.splitext(filename)[0] + ".mp4"
-                return filename
+                return resolve_downloaded_file(info)
         raise e
+
 
 
 def extract_playlist_items(url: str, cookie_path: Optional[str] = None, max_items: int = 25) -> List[Dict[str, Any]]:
