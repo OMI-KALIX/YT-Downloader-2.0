@@ -173,16 +173,22 @@ def get_video_formats(url: str, cookie_path: Optional[str] = None) -> Dict[str, 
     try:
         return extract_with_opts(ydl_opts)
     except Exception as e:
-        if "cookiefile" in ydl_opts:
-            logger.warning(f"yt-dlp format extraction failed with cookies: {e}. Retrying without cookiefile...")
-            ydl_opts_no_cookie = dict(ydl_opts)
-            ydl_opts_no_cookie.pop("cookiefile", None)
-            try:
-                return extract_with_opts(ydl_opts_no_cookie)
-            except Exception as e2:
-                logger.warning(f"yt-dlp format extraction failed without cookies: {e2}. Attempting oEmbed fallback...")
-        else:
-            logger.warning(f"yt-dlp format extraction failed: {e}. Attempting oEmbed fallback...")
+        logger.warning(f"yt-dlp format extraction primary attempt failed: {e}. Retrying with player_client fallback...")
+        ydl_opts_fallback = dict(ydl_opts)
+        ydl_opts_fallback["extractor_args"] = {"youtube": {"player_client": ["android", "mweb", "web"]}}
+        try:
+            return extract_with_opts(ydl_opts_fallback)
+        except Exception as e2:
+            if "cookiefile" in ydl_opts:
+                logger.warning(f"yt-dlp format extraction failed with cookies: {e2}. Retrying without cookiefile...")
+                ydl_opts_no_cookie = dict(ydl_opts_fallback)
+                ydl_opts_no_cookie.pop("cookiefile", None)
+                try:
+                    return extract_with_opts(ydl_opts_no_cookie)
+                except Exception as e3:
+                    logger.warning(f"yt-dlp format extraction failed without cookies: {e3}. Attempting oEmbed fallback...")
+            else:
+                logger.warning(f"yt-dlp format extraction failed: {e2}. Attempting oEmbed fallback...")
             
         oembed_data = fetch_oembed_metadata(url)
         if oembed_data:
@@ -363,15 +369,30 @@ def download_media(job_id: str, url: str, format_id: str, output_dir: str, cooki
             info = ydl.extract_info(url, download=True)
             return resolve_downloaded_file(info)
     except yt_dlp.utils.DownloadError as e:
-        logger.warning(f"yt-dlp download failed for job {job_id}: {e}. Retrying without cookiefile and with resilient format fallback...")
-        fallback_opts = dict(ydl_opts)
-        fallback_opts.pop("cookiefile", None)
-        fallback_opts["format"] = "bestaudio/best/ba/b/140/251/18" if is_audio else "bestvideo+bestaudio/best/18/b/ba"
+        logger.warning(f"yt-dlp download failed for job {job_id}: {e}. Executing Tier 2 player_client fallback...")
+        tier2_opts = dict(ydl_opts)
+        tier2_opts["extractor_args"] = {"youtube": {"player_client": ["android", "mweb", "web"]}}
+        if is_audio:
+            tier2_opts["format"] = "bestaudio/best/ba/b/140/251/18/best"
+        else:
+            target_fmt = format_id if format_id else "bestvideo+bestaudio/best"
+            tier2_opts["format"] = f"{target_fmt}/bestvideo+bestaudio/best/18/b/ba/best"
+
         try:
-            with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+            with yt_dlp.YoutubeDL(tier2_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 return resolve_downloaded_file(info)
-        except Exception:
+        except Exception as e2:
+            if "cookiefile" in tier2_opts:
+                logger.warning(f"yt-dlp download Tier 2 failed with cookies: {e2}. Executing Tier 3 fallback without cookies...")
+                tier3_opts = dict(tier2_opts)
+                tier3_opts.pop("cookiefile", None)
+                try:
+                    with yt_dlp.YoutubeDL(tier3_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        return resolve_downloaded_file(info)
+                except Exception:
+                    raise e
             raise e
 
 
