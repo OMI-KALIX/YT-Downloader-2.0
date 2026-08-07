@@ -1,4 +1,4 @@
-# 🎬 Youtube Downloader: YouTube Downloader Extension & Native Desktop App
+# 🎬 Youtube Downloader: YouTube Downloader Extension With Native Desktop Server
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Chrome_Extension-Manifest_V3-green.svg)](extension/)
