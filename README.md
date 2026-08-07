@@ -19,7 +19,7 @@ A ultra high-performance YouTube video & audio downloader suite combining a **Ch
 ## WalkThrough
 <p align="center">
   <a href="./assets/YT-Downloader-2.0.mp4">
-    <img src="./assets/demo.png" alt="Watch Demo" width="900">
+    <img src="./assets/demo.png" alt="Watch Demo" width="300" height="300">
   </a>
 </p>
 
