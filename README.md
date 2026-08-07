@@ -62,11 +62,15 @@ For the complete architectural evolution and past iterations (Cloud containers, 
 
 ### 2. Load Browser Extension
 
-1. Open Chrome or Edge and navigate to `chrome://extensions` or `edge://extensions`.
-2. Enable **Developer mode** toggle in the top right corner.
-3. Click **Load unpacked** and select the [`extension/`](extension/) directory from this repository.
-4. Open any YouTube video! Click the injected **Download** button to download up to 4K video or 320 kbps MP3 instantly.
+1. Open Chrome or Microsoft Edge and navigate to `chrome://extensions` or `edge://extensions`.
 
+2. Enable the **Developer mode** toggle in the top-right corner.
+
+3. Install the extension using either of these methods:
+   - **Recommended:** Download the latest release and load only the extension folder. No need to clone the repository.
+   - **Development:** Click **Load unpacked** and select the `extension/` directory from this repository.
+
+4. Open any YouTube video and click the injected **Download** button to instantly download videos in up to **4K** or audio in up to **320 kbps MP3**.
 ---
 
 ## 📁 Repository Structure
