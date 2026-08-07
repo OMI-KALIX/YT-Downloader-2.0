@@ -24,7 +24,7 @@ A ultra high-performance YouTube video & audio downloader suite combining a **Ch
 - 🎵 **320 kbps High-Bitrate MP3 Extraction**: High-fidelity audio processing with automated ID3 tag extraction.
 - 🍪 **Automatic Session Cookie Exporter**: Seamlessly passes active YouTube session cookies for private, restricted, or member-only video downloads without manual login.
 - 🖥️ **System Tray Native Desktop Integration**: Runs silently in the background with a Windows tray icon (`pystray`) for quick access to download folders, settings, and logs.
-- 📦 **Portable Standalone Executable**: No Python or dependencies required for end-users! Simply run `Downloader_v1.exe`.
+- 📦 **Portable Standalone Executable**: No Python or dependencies required for end-users! Simply run `Downloader_Server.exe`.
 
 ---
 
@@ -40,7 +40,7 @@ A ultra high-performance YouTube video & audio downloader suite combining a **Ch
 │  └──────────────────────────────┘                          ▼           │
 │                                           ┌──────────────────────────┐ │
 │                                           │ Downloader Server EXE    │ │
-│                                           │ (Downloader_v1.exe)      │ │
+│                                           │ (Downloader_Server.exe)      │ │
 │                                           │ FastAPI + yt-dlp + FFmpeg│ │
 │                                           └────────────┬─────────────┘ │
 │                                                        │               │
@@ -57,8 +57,8 @@ For the complete architectural evolution and past iterations (Cloud containers, 
 
 ### 1. Download & Run Desktop Server EXE
 
-1. Click **[Download Downloader Server EXE (Google Drive)](https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID/view?usp=sharing)** to download `Downloader_v1.exe`.
-2. Double-click `Downloader_v1.exe` to launch the background local server (`http://127.0.0.1:8000`). It will run quietly in your Windows System Tray.
+1. Click **[Download Downloader Server EXE (Google Drive)](https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID/view?usp=sharing)** to download `Downloader_Server.exe`.
+2. Double-click `Downloader_Server.exe` to launch the background local server (`http://127.0.0.1:8000`). It will run quietly in your Windows System Tray.
 
 ### 2. Load Browser Extension
 
@@ -72,7 +72,7 @@ For the complete architectural evolution and past iterations (Cloud containers, 
 ## 📁 Repository Structure
 
 ```
-youtube-downloader-extension/
+YT-Downloader-2.0/
 ├── .github/                   # GitHub Actions Workflows & CI automation
 ├── extension/                 # Chrome / Edge Extension (Manifest V3)
 │   ├── manifest.json          # Extension Manifest V3 spec
@@ -91,7 +91,7 @@ youtube-downloader-extension/
 └── render.yaml                # Render cloud deployment blueprint
 ```
 
-> 💡 **Note on Desktop App Binary**: The pre-compiled standalone Windows Desktop App (`Downloader_v1.exe`) is hosted on **[Google Drive](https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID/view?usp=sharing)** for 1-click instant setup without requiring Python or PyInstaller builds.
+> 💡 **Note on Desktop App Binary**: The pre-compiled standalone Windows Desktop App (`Downloader_Server.exe`) is hosted on **[Google Drive](https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID/view?usp=sharing)** for 1-click instant setup without requiring Python or PyInstaller builds.
 
 ---
 
