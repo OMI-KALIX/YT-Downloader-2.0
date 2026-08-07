@@ -12,7 +12,7 @@ A ultra high-performance YouTube video & audio downloader suite combining a **Ch
 > ### ⬇️ Download Portable Desktop Server Executable
 > To run the backend service without installing Python or setting up dependencies, download the pre-built single-file executable from Google Drive:
 > 
-> 👉 **[Download Downloader Server EXE (Google Drive)](https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID/view?usp=sharing)**
+> 👉 **[Download Downloader Server EXE (Google Drive)](https://drive.google.com/file/d/10Kgl-Xfn6Km09JjzfPTLb9RpeOJU4QLt/view?usp=sharing)**
 
 ---
 
@@ -57,7 +57,7 @@ For the complete architectural evolution and past iterations (Cloud containers, 
 
 ### 1. Download & Run Desktop Server EXE
 
-1. Click **[Download Downloader Server EXE (Google Drive)](https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID/view?usp=sharing)** to download `Downloader_Server.exe`.
+1. Click **[Download Downloader Server EXE (Google Drive)](https://drive.google.com/file/d/10Kgl-Xfn6Km09JjzfPTLb9RpeOJU4QLt/view?usp=sharing)** to download `Downloader_Server.exe`.
 2. Double-click `Downloader_Server.exe` to launch the background local server (`http://127.0.0.1:8000`). It will run quietly in your Windows System Tray.
 
 ### 2. Load Browser Extension
@@ -91,7 +91,7 @@ YT-Downloader-2.0/
 └── render.yaml                # Render cloud deployment blueprint
 ```
 
-> 💡 **Note on Desktop App Binary**: The pre-compiled standalone Windows Desktop App (`Downloader_Server.exe`) is hosted on **[Google Drive](https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID/view?usp=sharing)** for 1-click instant setup without requiring Python or PyInstaller builds.
+> 💡 **Note on Desktop App Binary**: The pre-compiled standalone Windows Desktop App (`Downloader_Server.exe`) is hosted on **[Google Drive](https://drive.google.com/file/d/10Kgl-Xfn6Km09JjzfPTLb9RpeOJU4QLt/view?usp=sharing)** for 1-click instant setup without requiring Python or PyInstaller builds.
 
 ---
 
