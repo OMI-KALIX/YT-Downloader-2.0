@@ -16,6 +16,17 @@ A ultra high-performance YouTube video & audio downloader suite combining a **Ch
 
 ---
 
+## WalkThrough
+<p align="center">
+  <a href="./assets/YT-Downloader-2.0.mp4">
+    <img src="./assets/demo.png" alt="Watch Demo" width="900">
+  </a>
+</p>
+
+<p align="center">
+  <b>▶ Click the image above to watch the demo</b>
+</p>
+
 ## 🌟 Key Features
 
 - ⚡ **Native YouTube UI Injection**: Injects a sleek, dark-themed **Download** button directly into YouTube's player action bar next to Like/Share buttons.
