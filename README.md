@@ -2,10 +2,17 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Manifest V3](https://img.shields.io/badge/Chrome_Extension-Manifest_V3-green.svg)](extension/)
-[![Python 3.11](https://img.shields.io/badge/Python-3.11+-brightgreen.svg)](backend/)
-[![PyInstaller](https://img.shields.io/badge/Executable-Portable_.exe-orange.svg)](build_exe.py)
+[![Download Desktop App](https://img.shields.io/badge/Download-Desktop_App_Server_(.exe)-blue?logo=google-drive)](https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID/view?usp=sharing)
 
 A ultra high-performance YouTube video & audio downloader suite combining a **Chrome/Edge Extension (Manifest V3)** with a **Standalone Portable Desktop Backend Executable (`Downloader_v1.exe`)**. Supports resolutions up to **4K / 8K Ultra HD @ 60 FPS** and high-bitrate **320 kbps MP3 Audio** extraction.
+
+---
+
+> [!IMPORTANT]
+> ### ⬇️ Download Portable Desktop Server Executable
+> To run the backend service without installing Python or setting up dependencies, download the pre-built single-file executable from Google Drive:
+> 
+> 👉 **[Download Downloader Server EXE (Google Drive)](https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID/view?usp=sharing)**
 
 ---
 
@@ -32,7 +39,7 @@ A ultra high-performance YouTube video & audio downloader suite combining a **Ch
 │  │  (Manifest V3 + Injected UI) │                          │           │
 │  └──────────────────────────────┘                          ▼           │
 │                                           ┌──────────────────────────┐ │
-│                                           │ Portable Desktop App     │ │
+│                                           │ Downloader Server EXE    │ │
 │                                           │ (Downloader_v1.exe)      │ │
 │                                           │ FastAPI + yt-dlp + FFmpeg│ │
 │                                           └────────────┬─────────────┘ │
@@ -48,43 +55,17 @@ For the complete architectural evolution and past iterations (Cloud containers, 
 
 ## 🚀 Quick Start Guide
 
-### Option 1: Portable Executable (Recommended for Windows Users)
+### 1. Download & Run Desktop Server EXE
 
-1. Launch `dist/Downloader_v1.exe` or download the pre-built single-file release.
-2. The app starts a background local service on `http://127.0.0.1:8000` and displays a system tray icon.
-3. Open Chrome or Edge, navigate to `chrome://extensions` (or `edge://extensions`), enable **Developer Mode**, and click **Load Unpacked**.
-4. Select the [`extension/`](extension/) directory from this repository.
-5. Open any YouTube video! Click the injected **Download** button to download instantly.
+1. Click **[Download Downloader Server EXE (Google Drive)](https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID/view?usp=sharing)** to download `Downloader_v1.exe`.
+2. Double-click `Downloader_v1.exe` to launch the background local server (`http://127.0.0.1:8000`). It will run quietly in your Windows System Tray.
 
----
+### 2. Load Browser Extension
 
-### Option 2: Developer / Python Local Setup
-
-1. **Install Dependencies**:
-   ```bash
-   pip install -r backend/requirements.txt
-   ```
-2. **Run Desktop App**:
-   ```bash
-   python -m desktop.app
-   ```
-3. **Load Browser Extension**:
-   - Load [`extension/`](extension/) folder as an Unpacked Extension in Chrome or Edge.
-
----
-
-## 🔨 Building the Standalone `.exe` Package
-
-You can build your own portable `.exe` package using the included `build_exe.py` script:
-
-```bash
-python build_exe.py
-```
-
-This automated builder:
-1. Automatically verifies PyInstaller and GUI dependencies.
-2. Automatically downloads static Windows **FFmpeg** binaries (`ffmpeg.exe` & `ffprobe.exe`) if not found locally.
-3. Packages the backend engine, routes, and tray icons into a portable single-file executable: `dist/Downloader_v1.exe`.
+1. Open Chrome or Edge and navigate to `chrome://extensions` or `edge://extensions`.
+2. Enable **Developer mode** toggle in the top right corner.
+3. Click **Load unpacked** and select the [`extension/`](extension/) directory from this repository.
+4. Open any YouTube video! Click the injected **Download** button to download up to 4K video or 320 kbps MP3 instantly.
 
 ---
 
@@ -92,27 +73,25 @@ This automated builder:
 
 ```
 youtube-downloader-extension/
+├── .github/                   # GitHub Actions Workflows & CI automation
 ├── extension/                 # Chrome / Edge Extension (Manifest V3)
 │   ├── manifest.json          # Extension Manifest V3 spec
 │   ├── background/            # Service worker & background message routing
 │   ├── content/               # Injected YouTube watch page UI button & modal
 │   ├── popup/                 # Toolbar extension popup UI & settings
 │   └── utils/                 # Netscape cookie converter
-├── desktop/                   # Desktop Native GUI & Tray Server
-│   ├── app.py                 # Desktop app entrypoint (FastAPI + Tray)
-│   ├── tray.py                # System tray icon & context menu handlers
-│   ├── config.py              # User settings manager
-│   └── path_resolver.py       # Portable binary path resolver
-├── backend/                   # Core Python Backend Engine
-│   ├── main.py                # FastAPI app initialization
-│   ├── api/                   # REST API routes (/formats, /download, /mux)
-│   ├── downloader/            # yt-dlp wrapper & format parser
-│   └── jobs/                  # Thread-safe job & progress tracker
-├── tests/                     # Unit test suite
-├── build_exe.py               # Automated PyInstaller & FFmpeg build script
-├── PROJECT_HISTORY.md         # Detailed chapterwise architectural history
-└── CODE_OF_CONDUCT.md         # Open-source community guidelines
+├── .gitignore                 # Git ignore rules
+├── CODE_OF_CONDUCT.md         # Open-source community guidelines
+├── Dockerfile                 # Docker container setup (optional cloud deployment)
+├── LICENSE                    # MIT License
+├── PROJECT_HISTORY.md         # Complete chapterwise project history & evolution
+├── README.md                  # Master project documentation & setup guide
+├── TROUBLESHOOTING.md         # FAQ & troubleshooting guide
+├── config.json                # Extension configuration parameters
+└── render.yaml                # Render cloud deployment blueprint
 ```
+
+> 💡 **Note on Desktop App Binary**: The pre-compiled standalone Windows Desktop App (`Downloader_v1.exe`) is hosted on **[Google Drive](https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID/view?usp=sharing)** for 1-click instant setup without requiring Python or PyInstaller builds.
 
 ---
 
