@@ -1,14 +1,16 @@
 {
   "manifest_version": 3,
   "name": "YouTube Downloader Pro",
-  "version": "1.0.0",
+  "version": "2.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAw/aLuoN62sXbYcbeBBT8Q7qWaQ6XsOA8/890gOoh2Km3NyMSAwBjlEemOaCdlwcdO1sXdU8JkF1Ihe+4Xnqy5ZVUOepVeiPtVX/8EActTfs6tC7Ty/IF+9qx5Re0ZliEEXbHI+CfT7Z1zUDLlarRQ/V1HGAAC2d8S/3PGAid7IIlY+hrg9HzrZsBKm0NAdqnJ84H98p4w6dGRAmWVjgvgkEWCAvxdMrs5lZ5Vqu00k4Q6xpsdsvkePFeWc69UYDkLjw1NxLOnJArzwG9lKNOKHUrrgqXjzsDwP42B/kh3/g6HEu9m2AmkBkPkEvLro+msse2v16fBBczeKfTgZyd3wIDAQAB",
   "description": "High quality YouTube video & audio downloader powered by cloud backend.",
   "permissions": [
     "cookies",
     "storage",
     "activeTab",
     "downloads",
-    "tabs"
+    "tabs",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "*://*.youtube.com/*",

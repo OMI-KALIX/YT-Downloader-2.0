@@ -1,385 +1,320 @@
 import { convertToNetscapeCookies } from '../utils/cookie_exporter.js';
+import { nativeClient } from '../native/messaging.js';
 
-// Default backend URL & API key (configurable via storage)
-let BACKEND_URL = "https://youtube-downloader-extension-bul7.onrender.com";
-let API_KEY = "";
+// Default cloud control plane URL
+let CLOUD_CONTROL_URL = "https://youtube-downloader-extension-bul7.onrender.com";
 
-// Load custom storage settings
-chrome.storage.local.get(["backendUrl", "apiKey"], (res) => {
-  if (res.backendUrl) BACKEND_URL = res.backendUrl.replace(/\/$/, "");
-  if (res.apiKey) API_KEY = res.apiKey;
-});
+const activeJobsMap = new Map();
+let currentActiveJob = null;
 
-chrome.storage.onChanged.addListener((changes) => {
-  if (changes.backendUrl) BACKEND_URL = changes.backendUrl.newValue.replace(/\/$/, "");
-  if (changes.apiKey) API_KEY = changes.apiKey.newValue || "";
-});
-
-async function getAuthHeaders() {
-  const headers = { "Content-Type": "application/json" };
-  if (API_KEY) headers["x-api-key"] = API_KEY;
-  return headers;
+function extractYouTubeId(url) {
+  if (!url) return "";
+  let match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+  return match ? match[1] : "";
 }
 
-// Extract cookies for YouTube domain
-async function getYouTubeNetscapeCookies() {
-  return new Promise((resolve) => {
-    chrome.cookies.getAll({ domain: ".youtube.com" }, (cookies) => {
-      if (chrome.runtime.lastError || !cookies) {
-        console.error("Failed to get cookies:", chrome.runtime.lastError);
-        resolve("");
-        return;
+function fetchOembedTitle(url, callback) {
+  if (!url || (!url.includes("youtube.com") && !url.includes("youtu.be"))) return;
+  const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
+  fetch(oembedUrl)
+    .then(r => r.json())
+    .then(data => {
+      if (data && data.title) {
+        callback(data.title, data.author_name);
       }
-      const netscapeStr = convertToNetscapeCookies(cookies);
-      resolve(netscapeStr);
-    });
+    })
+    .catch(() => {});
+}
+
+function updateActiveJobStorage(jobData) {
+  currentActiveJob = jobData;
+  if (jobData === null) {
+    chrome.storage.local.remove(["activeJob"]);
+  } else {
+    chrome.storage.local.set({ activeJob: jobData });
+  }
+}
+
+// Universal History Logger - Matches primarily by URL so completion always updates the correct item!
+function saveHistoryItem(item) {
+  if (!item) return;
+  const targetUrl = item.url || (item.job_id ? (activeJobsMap.get(item.job_id) || {}).url : "");
+  if (!targetUrl && !item.job_id) return;
+
+  chrome.storage.local.get(["downloadHistory"], (res) => {
+    let history = res.downloadHistory || [];
+    
+    // Find index matching URL first, or matching job_id
+    let idx = -1;
+    if (targetUrl) {
+      idx = history.findIndex(h => h.url && (h.url === targetUrl || extractYouTubeId(h.url) === extractYouTubeId(targetUrl)));
+    }
+    if (idx < 0 && item.job_id) {
+      idx = history.findIndex(h => h.job_id && h.job_id === item.job_id);
+    }
+
+    let titleToSave = item.title;
+    if (idx >= 0 && history[idx].title && !history[idx].title.startsWith("YouTube Video [") && (!titleToSave || titleToSave.startsWith("YouTube Video ["))) {
+      titleToSave = history[idx].title;
+    }
+
+    if (!titleToSave || titleToSave.includes("Extracting video details") || titleToSave.includes("Loading metadata")) {
+      const vId = extractYouTubeId(targetUrl);
+      titleToSave = vId ? `YouTube Video [${vId}]` : (targetUrl || "YouTube Video");
+    }
+
+    const newItem = {
+      job_id: item.job_id || (idx >= 0 ? history[idx].job_id : `job_${Date.now()}`),
+      url: targetUrl || (idx >= 0 ? history[idx].url : ""),
+      title: titleToSave,
+      format: item.format || (idx >= 0 ? history[idx].format : "1080p"),
+      status: item.status || (idx >= 0 ? history[idx].status : "downloading"),
+      timestamp: item.timestamp || (idx >= 0 ? history[idx].timestamp : new Date().toLocaleString()),
+      ...item
+    };
+    newItem.title = titleToSave;
+    newItem.url = targetUrl || newItem.url;
+
+    if (idx >= 0) {
+      history[idx] = { ...history[idx], ...newItem };
+    } else {
+      history.unshift(newItem);
+    }
+
+    if (history.length > 50) history = history.slice(0, 50);
+    chrome.storage.local.set({ downloadHistory: history });
+
+    // Fetch oEmbed title if title is still generic
+    if (newItem.url && titleToSave.startsWith("YouTube Video [")) {
+      fetchOembedTitle(newItem.url, (realTitle) => {
+        if (realTitle) {
+          saveHistoryItem({ url: newItem.url, title: realTitle });
+        }
+      });
+    }
   });
 }
 
-// Helper function to ping backend health
-async function pingBackendHealth() {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(`${BACKEND_URL}/api/health`, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    return res.ok;
-  } catch (err) {
-    return false;
+// Keep-alive heartbeat so Manifest V3 service worker stays awake during active downloads
+setInterval(() => {
+  if (currentActiveJob) {
+    try {
+      nativeClient.connect();
+    } catch (e) {}
   }
-}
+}, 15000);
 
-// Automatically wake up backend when user opens YouTube in any tab
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === "complete" && tab.url && tab.url.includes("youtube.com")) {
-    pingBackendHealth().then(isOnline => {
-      console.log(`Auto-pinged Render backend on YouTube tab load. Online: ${isOnline}`);
+// Register native message event listener to broadcast progress updates & maintain persistent history
+nativeClient.addEventListener((msg) => {
+  const reqId = msg.id;
+  const activeJob = activeJobsMap.get(reqId) || {};
+  const jobUrl = activeJob.url || msg.payload.url;
+
+  if (msg.event === "progress" || msg.event === "download_started") {
+    const jobState = {
+      job_id: reqId,
+      status: msg.payload.state || msg.payload.status || "downloading",
+      percent: msg.payload.percent || 1,
+      speed: msg.payload.speed || "Connecting...",
+      eta: msg.payload.eta || "Calculating...",
+      url: jobUrl,
+      title: activeJob.title,
+    };
+
+    updateActiveJobStorage(jobState);
+
+    chrome.runtime.sendMessage({
+      action: "JOB_PROGRESS_UPDATE",
+      job: jobState
+    }).catch(() => {});
+
+    saveHistoryItem({
+      job_id: reqId,
+      url: jobUrl,
+      title: activeJob.title,
+      status: msg.payload.state || "downloading",
+      percent: msg.payload.percent,
     });
+  } else if (msg.event === "completed") {
+    const completedJob = {
+      job_id: reqId,
+      status: "completed",
+      percent: 100,
+      filename: msg.payload.filename,
+    };
+
+    updateActiveJobStorage(completedJob);
+
+    chrome.runtime.sendMessage({
+      action: "JOB_PROGRESS_UPDATE",
+      job: completedJob
+    }).catch(() => {});
+
+    saveHistoryItem({
+      job_id: reqId,
+      url: jobUrl,
+      title: msg.payload.filename || activeJob.title,
+      status: "completed",
+      percent: 100,
+      filename: msg.payload.filename,
+    });
+
+    activeJobsMap.delete(reqId);
+
+    // Clear active job storage after 4 seconds so subsequent downloads start clean
+    setTimeout(() => {
+      if (currentActiveJob && currentActiveJob.job_id === reqId) {
+        updateActiveJobStorage(null);
+      }
+    }, 4000);
+  } else if (msg.event === "cancelled") {
+    const cancelledJob = {
+      job_id: reqId,
+      status: "cancelled",
+      percent: 0,
+    };
+
+    updateActiveJobStorage(cancelledJob);
+
+    chrome.runtime.sendMessage({
+      action: "JOB_PROGRESS_UPDATE",
+      job: cancelledJob
+    }).catch(() => {});
+
+    saveHistoryItem({
+      job_id: reqId,
+      url: jobUrl,
+      status: "cancelled",
+    });
+
+    activeJobsMap.delete(reqId);
+    setTimeout(() => updateActiveJobStorage(null), 2000);
+  } else if (msg.event === "error") {
+    const failedJob = {
+      job_id: reqId,
+      status: "failed",
+      error: msg.payload.message || msg.payload.code,
+    };
+
+    updateActiveJobStorage(failedJob);
+
+    chrome.runtime.sendMessage({
+      action: "JOB_PROGRESS_UPDATE",
+      job: failedJob
+    }).catch(() => {});
+
+    saveHistoryItem({
+      job_id: reqId,
+      url: jobUrl,
+      status: "failed",
+      error: msg.payload.message,
+    });
+
+    activeJobsMap.delete(reqId);
+    setTimeout(() => updateActiveJobStorage(null), 2000);
   }
 });
 
-// Handle incoming messages
+// Auto connect to native agent host
+try {
+  nativeClient.connect();
+} catch (e) {}
+
+// Handle incoming UI messages
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "WAKE_BACKEND") {
-    pingBackendHealth().then(isOnline => sendResponse({ isOnline }));
+  if (request.action === "GET_ACTIVE_JOB") {
+    sendResponse({ activeJob: currentActiveJob });
     return true;
   }
 
-  if (request.action === "CHECK_BACKEND_HEALTH") {
-    (async () => {
-      let isOnline = await pingBackendHealth();
-      if (isOnline) {
-        sendResponse({ isOnline: true, status: "online" });
-        return;
-      }
-      
-      let attempts = 0;
-      const maxAttempts = 30;
-      const interval = setInterval(async () => {
-        attempts++;
-        isOnline = await pingBackendHealth();
-        if (isOnline) {
-          clearInterval(interval);
-          chrome.runtime.sendMessage({ action: "BACKEND_STATUS_UPDATE", status: "online" });
-        } else if (attempts >= maxAttempts) {
-          clearInterval(interval);
-          chrome.runtime.sendMessage({ action: "BACKEND_STATUS_UPDATE", status: "offline" });
-        } else {
-          chrome.runtime.sendMessage({ action: "BACKEND_STATUS_UPDATE", status: "waking", attempt: attempts });
-        }
-      }, 2000);
-
-      sendResponse({ isOnline: false, status: "waking" });
-    })();
-    return true;
-  }
-
-  if (request.action === "GET_COOKIES") {
-    getYouTubeNetscapeCookies().then(cookies => sendResponse({ cookies }));
+  if (request.action === "CHECK_AGENT_STATUS") {
+    if (nativeClient.port || currentActiveJob) {
+      sendResponse({ success: true, isReady: true });
+      return true;
+    }
+    nativeClient.sendRequest("status", {}, 5000)
+      .then(res => sendResponse({ success: true, isReady: true, status: res }))
+      .catch(err => sendResponse({ success: false, isReady: false, error: err.message }));
     return true;
   }
 
   if (request.action === "FETCH_FORMATS") {
-    (async () => {
-      try {
-        const cookies = await getYouTubeNetscapeCookies();
-        const headers = await getAuthHeaders();
-        const res = await fetch(`${BACKEND_URL}/api/formats`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ url: request.url, cookies })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          sendResponse({ success: false, error: data.detail || "Error fetching formats" });
-          return;
-        }
-        sendResponse({ success: true, data: data.data });
-      } catch (err) {
-        sendResponse({ success: false, error: err.message });
-      }
-    })();
-    return true;
-  }
-
-  if (request.action === "START_CLIENT_DOWNLOAD") {
-    const filename = `${sanitizeFilename(request.title || "youtube_video")}.mp4`;
-    console.log(`[AnyDownloader] Starting direct client-side browser download for ${filename}`);
-    chrome.downloads.download(
-      {
-        url: request.url,
-        filename: filename,
-        saveAs: false
-      },
-      (downloadId) => {
-        if (chrome.runtime.lastError) {
-          console.error("Client download failed:", chrome.runtime.lastError);
-          sendResponse({ success: false, error: chrome.runtime.lastError.message });
-        } else {
-          sendResponse({ success: true, downloadId });
-        }
-      }
-    );
-    return true;
-  }
-
-  if (request.action === "START_MUX_DOWNLOAD") {
-    (async () => {
-      try {
-        const headers = await getAuthHeaders();
-        console.log(`[AnyDownloader] Posting direct stream URLs to /api/mux [video: ${Boolean(request.video_url)}, audio: ${Boolean(request.audio_url)}]`);
-        const res = await fetch(`${BACKEND_URL}/api/mux`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            video_url: request.video_url,
-            audio_url: request.audio_url,
-            title: request.title,
-            format_id: request.format_id
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          sendResponse({ success: false, error: data.detail || "Direct stream mux request rejected" });
-          return;
-        }
-
-        if (data.job_id) {
-          sendResponse({ success: true, jobId: data.job_id });
-          trackDownloadProgress(data.job_id);
-        } else {
-          sendResponse({ success: false, error: "No job ID returned for mux request" });
-        }
-      } catch (err) {
-        sendResponse({ success: false, error: err.message });
-      }
-    })();
-    return true;
-  }
-
-  if (request.action === "START_DOWNLOAD" || request.action === "START_BATCH_DOWNLOAD") {
-    (async () => {
-      try {
-        const cookies = await getYouTubeNetscapeCookies();
-        const headers = await getAuthHeaders();
-        const endpoint = request.action === "START_BATCH_DOWNLOAD" ? "/api/batch" : "/api/download";
-
-        const res = await fetch(`${BACKEND_URL}${endpoint}`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
+    nativeClient.sendRequest("get_formats", { url: request.url }, 45000)
+      .then(res => {
+        if (res && res.title) {
+          saveHistoryItem({
             url: request.url,
-            format_id: request.format_id || "bestvideo+bestaudio/best",
-            cookies,
-            delay_seconds: request.delay_seconds || 0
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          sendResponse({ success: false, error: data.detail || "Download request rejected" });
-          return;
+            title: res.title,
+          });
         }
+        sendResponse({ success: true, data: res });
+      })
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 
-        if (data.job_id) {
-          sendResponse({ success: true, jobId: data.job_id });
-          trackDownloadProgress(data.job_id);
-        } else {
-          sendResponse({ success: false, error: "No job ID returned" });
-        }
-      } catch (err) {
-        sendResponse({ success: false, error: err.message });
-      }
-    })();
+  if (request.action === "START_DOWNLOAD") {
+    const videoId = extractYouTubeId(request.url);
+    const thumbUrl = videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : "";
+
+    const jobId = `job_${Date.now()}`;
+    const historyItem = {
+      job_id: jobId,
+      url: request.url,
+      title: request.title || "YouTube Video",
+      thumbnail: thumbUrl,
+      format: request.format_id || "1080p",
+      status: "downloading",
+      timestamp: new Date().toLocaleString(),
+    };
+
+    const initialJob = {
+      job_id: jobId,
+      status: "CONNECTING TO YOUTUBE",
+      percent: 1,
+      speed: "Connecting...",
+      eta: "Calculating...",
+      url: request.url,
+      title: request.title || "YouTube Video",
+    };
+
+    updateActiveJobStorage(initialJob);
+
+    activeJobsMap.set(jobId, historyItem);
+    saveHistoryItem(historyItem);
+
+    // Broadcast instant progress update right away
+    chrome.runtime.sendMessage({
+      action: "JOB_PROGRESS_UPDATE",
+      job: initialJob
+    }).catch(() => {});
+
+    nativeClient.sendRequest("download", { url: request.url, format: request.format_id || "1080p" }, 30000)
+      .then(res => {
+        const finalId = res.id || res.job_id || jobId;
+        activeJobsMap.set(finalId, historyItem);
+        sendResponse({ success: true, jobId: finalId });
+      })
+      .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
 
   if (request.action === "CANCEL_JOB") {
-    (async () => {
-      try {
-        const headers = await getAuthHeaders();
-        const res = await fetch(`${BACKEND_URL}/api/cancel/${request.jobId}`, { method: "POST", headers });
-        const data = await res.json();
-        sendResponse({ success: res.ok, data });
-      } catch (err) {
-        sendResponse({ success: false, error: err.message });
-      }
-    })();
+    updateActiveJobStorage(null);
+    nativeClient.sendRequest("cancel", { job_id: request.jobId }, 3000)
+      .then(res => sendResponse({ success: true, data: res }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
 
-  if (request.action === "PAUSE_JOB") {
-    (async () => {
-      try {
-        const headers = await getAuthHeaders();
-        const res = await fetch(`${BACKEND_URL}/api/pause/${request.jobId}`, { method: "POST", headers });
-        const data = await res.json();
-        sendResponse({ success: res.ok, data });
-      } catch (err) {
-        sendResponse({ success: false, error: err.message });
-      }
-    })();
-    return true;
-  }
-
-  if (request.action === "RESUME_JOB") {
-    (async () => {
-      try {
-        const headers = await getAuthHeaders();
-        const res = await fetch(`${BACKEND_URL}/api/resume/${request.jobId}`, { method: "POST", headers });
-        const data = await res.json();
-        sendResponse({ success: res.ok, data });
-      } catch (err) {
-        sendResponse({ success: false, error: err.message });
-      }
-    })();
-    return true;
-  }
-
-  if (request.action === "GET_JOB_STATUS") {
-    (async () => {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/progress/${request.jobId}`);
-        const data = await res.json();
-        sendResponse({ success: true, data });
-      } catch (err) {
-        sendResponse({ success: false, error: err.message });
-      }
-    })();
+  if (request.action === "WAKE_BACKEND" || request.action === "CHECK_BACKEND_HEALTH") {
+    if (nativeClient.port || currentActiveJob) {
+      sendResponse({ isOnline: true, status: "online", native: true });
+      return true;
+    }
+    nativeClient.sendRequest("status", {}, 5000)
+      .then(res => sendResponse({ isOnline: true, status: "online", native: true }))
+      .catch(err => sendResponse({ isOnline: false, status: "offline", native: false, error: err.message }));
     return true;
   }
 });
-
-function sanitizeFilename(name) {
-  if (!name) return "youtube_download";
-  return name.replace(/[\\/*?:"<>|]/g, "").trim() || "youtube_download";
-}
-
-// Primary tracker: attempts WebSocket connection first, falls back seamlessly to HTTP polling
-function trackDownloadProgress(jobId) {
-  let isFinished = false;
-
-  const wsScheme = BACKEND_URL.startsWith("https") ? "wss" : "ws";
-  const wsHost = BACKEND_URL.replace(/^https?:\/\//, "");
-  const wsUrl = `${wsScheme}://${wsHost}/api/ws/${jobId}`;
-
-  console.log(`[AnyDownloader] Connecting WebSocket: ${wsUrl}`);
-  let ws = null;
-
-  try {
-    ws = new WebSocket(wsUrl);
-  } catch (err) {
-    console.warn(`[AnyDownloader] WebSocket creation failed: ${err.message}. Falling back to polling.`);
-    pollDownloadProgress(jobId);
-    return;
-  }
-
-  ws.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      if (data.ping) return;
-
-      chrome.runtime.sendMessage({ action: "JOB_PROGRESS_UPDATE", job: data });
-
-      if (data.status === "completed") {
-        isFinished = true;
-        ws.close();
-        if (!data.is_batch && (data.file_path || data.filename)) {
-          const fileUrl = `${BACKEND_URL}/api/file/${jobId}`;
-          const cleanName = sanitizeFilename(data.filename);
-          chrome.downloads.download({
-            url: fileUrl,
-            filename: cleanName,
-            saveAs: true
-          }, (downloadId) => {
-            if (chrome.runtime.lastError) {
-              console.error("[AnyDownloader] Chrome download failed:", chrome.runtime.lastError.message);
-            } else {
-              console.log(`[AnyDownloader] Chrome download started with ID: ${downloadId}`);
-            }
-          });
-        } else if (data.is_batch && data.sub_jobs) {
-          // Trigger download for each sub job
-          data.sub_jobs.forEach(subId => trackDownloadProgress(subId));
-        }
-      } else if (data.status === "failed" || data.status === "cancelled") {
-        isFinished = true;
-        ws.close();
-      }
-    } catch (e) {
-      console.error("[AnyDownloader] Error parsing WS message:", e);
-    }
-  };
-
-  ws.onerror = (err) => {
-    console.warn("[AnyDownloader] WebSocket error. Initiating HTTP polling fallback.", err);
-    if (!isFinished) pollDownloadProgress(jobId);
-  };
-
-  ws.onclose = () => {
-    if (!isFinished) {
-      console.log("[AnyDownloader] WebSocket closed. Switching to HTTP polling.");
-      pollDownloadProgress(jobId);
-    }
-  };
-}
-
-// HTTP Polling Fallback
-async function pollDownloadProgress(jobId) {
-  const interval = setInterval(async () => {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/progress/${jobId}`);
-      if (!res.ok) {
-        clearInterval(interval);
-        return;
-      }
-      const data = await res.json();
-      
-      chrome.runtime.sendMessage({ action: "JOB_PROGRESS_UPDATE", job: data });
-
-      if (data.status === "completed") {
-        clearInterval(interval);
-        if (!data.is_batch && (data.file_path || data.filename)) {
-          const fileUrl = `${BACKEND_URL}/api/file/${jobId}`;
-          const cleanName = sanitizeFilename(data.filename);
-          chrome.downloads.download({
-            url: fileUrl,
-            filename: cleanName,
-            saveAs: true
-          }, (downloadId) => {
-            if (chrome.runtime.lastError) {
-              console.error("[AnyDownloader] Chrome download failed:", chrome.runtime.lastError.message);
-            }
-          });
-        } else if (data.is_batch && data.sub_jobs) {
-          data.sub_jobs.forEach(subId => trackDownloadProgress(subId));
-        }
-      } else if (data.status === "failed" || data.status === "cancelled") {
-        clearInterval(interval);
-      }
-    } catch (e) {
-      clearInterval(interval);
-    }
-  }, 1000);
-}
-
-

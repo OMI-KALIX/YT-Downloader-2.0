@@ -1,0 +1,30 @@
+name: Build Setup Package
+
+on:
+  push:
+    branches: [ main, feature/native-agent ]
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r native-agent/requirements.txt
+
+      - name: Package Setup
+        run: |
+          python installer/build_installer.py
+
+      - name: Upload Installer Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: YT-Downloader-Setup
+          path: dist/YT-Downloader-Setup/

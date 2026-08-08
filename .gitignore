@@ -33,3 +33,7 @@ bin/
 *.zip
 .pytest_cache/
 run.log
+native-agent/build_tmp/
+native-agent/binaries/
+*.exe
+

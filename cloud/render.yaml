@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: yt-downloader-control-plane
+    env: python
+    buildCommand: pip install -r cloud/requirements.txt
+    startCommand: uvicorn cloud.app.main:app --host 0.0.0.0 --port $PORT
+    plan: free

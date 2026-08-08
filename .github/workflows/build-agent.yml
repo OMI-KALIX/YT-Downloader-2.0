@@ -1,0 +1,37 @@
+name: Build Native Agent Binary
+
+on:
+  push:
+    branches: [ main, feature/native-agent ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-agent:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r native-agent/requirements.txt
+
+      - name: Run Native Agent Unit Tests
+        run: |
+          PYTHONPATH=. pytest tests/native-agent/ -v
+
+      - name: Build downloader-agent.exe
+        run: |
+          python native-agent/build.py
+
+      - name: Upload Agent Executable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: downloader-agent
+          path: native-agent/dist/downloader-agent.exe

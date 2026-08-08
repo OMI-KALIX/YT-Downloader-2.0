@@ -1,0 +1,40 @@
+name: Release Automation
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r native-agent/requirements.txt
+          pip install -r cloud/requirements.txt
+
+      - name: Run All Test Suites
+        run: |
+          PYTHONPATH=. pytest tests/native-agent/ tests/cloud/ -v
+
+      - name: Build Agent & Installer
+        run: |
+          python native-agent/build.py
+          python installer/build_installer.py
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            native-agent/dist/downloader-agent.exe
+            dist/YT-Downloader-Setup/
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YouTube Downloader Pro</title>
+  <title>YouTube Downloader Pro 2.1</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -13,11 +13,13 @@
         <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
       </svg>
       <span>YT Downloader</span>
+      <span class="version-badge">v2.1</span>
     </div>
     <div class="nav-icons">
       <button class="nav-btn active" id="tab-downloader" title="Downloader">📥</button>
       <button class="nav-btn" id="tab-history" title="History">📜</button>
       <button class="nav-btn" id="tab-settings" title="Settings">⚙️</button>
+      <button class="nav-btn" id="refresh-btn" title="Refresh UI & Progress">↺</button>
     </div>
   </div>
 
@@ -25,14 +27,25 @@
     <!-- Backend Health Status Banner -->
     <div id="backend-status-banner" class="backend-banner hidden">
       <div class="banner-spinner"></div>
-      <span id="backend-status-text">Waking up cloud backend (Render spin-up)... Please wait</span>
+      <span id="backend-status-text">Connecting to native downloader agent...</span>
     </div>
 
     <!-- Main Downloader View -->
     <div id="main-view">
-      <div class="card" id="video-card">
+      <div class="form-group">
+        <label for="custom-url-input">Enter YouTube Video or Playlist URL</label>
+        <div class="input-with-button">
+          <input type="text" id="custom-url-input" placeholder="Paste link (https://youtu.be/... or youtube.com)">
+          <button id="fetch-url-btn" class="btn-sm btn-glow">Load</button>
+        </div>
+      </div>
+
+      <div class="card glass-card" id="video-card">
         <div class="video-info">
-          <img id="thumb" class="thumbnail" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='56'%3E%3Crect width='100' height='56' fill='%2327272a'/%3E%3C/svg%3E" alt="Thumbnail">
+          <div class="thumb-container">
+            <img id="thumb" class="thumbnail" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='68'%3E%3Crect width='120' height='68' fill='%2327272a'/%3E%3C/svg%3E" alt="Thumbnail">
+            <span id="duration-tag" class="duration-tag hidden">00:00</span>
+          </div>
           <div class="video-details">
             <div id="title" class="video-title">Detecting YouTube video...</div>
             <div id="uploader" class="video-uploader">--</div>
@@ -42,34 +55,30 @@
 
       <div class="form-group">
         <label for="quality-select">Select Quality / Format</label>
-        <select id="quality-select">
-          <optgroup label="🎬 Video Quality">
-            <option value="bestvideo+bestaudio/best">🔥 Best Available (4K / HD)</option>
-            <option value="bestvideo[height<=1080]+bestaudio/best">Full HD (1080p)</option>
-            <option value="bestvideo[height<=720]+bestaudio/best">HD (720p)</option>
-            <option value="bestvideo[height<=480]+bestaudio/best">480p SD</option>
-            <option value="bestvideo[height<=360]+bestaudio/best">360p SD</option>
+        <select id="quality-select" class="styled-select">
+          <optgroup label="🎬 Video Resolutions">
+            <option value="bestvideo[height<=2160]+bestaudio/best">🎬 4K Ultra HD (2160p)</option>
+            <option value="bestvideo[height<=1440]+bestaudio/best">🎬 2K Quad HD (1440p)</option>
+            <option value="bestvideo[height<=1080]+bestaudio/best" selected>🎬 Full HD (1080p)</option>
+            <option value="bestvideo[height<=720]+bestaudio/best">🎬 HD (720p)</option>
+            <option value="bestvideo[height<=480]+bestaudio/best">🎬 480p SD</option>
+            <option value="bestvideo[height<=360]+bestaudio/best">🎬 360p SD</option>
           </optgroup>
-          <optgroup label="🎵 Audio Quality (MP3)">
-            <option value="audio_320k">320 kbps (High Quality MP3)</option>
-            <option value="audio_192k">192 kbps (Medium Quality MP3)</option>
-            <option value="audio_128k">128 kbps (Standard Quality MP3)</option>
+          <optgroup label="🎵 High Fidelity Audio (MP3)">
+            <option value="audio_320k">🎵 320 kbps High Quality MP3 (~8-12 MB)</option>
+            <option value="audio_192k">🎵 192 kbps Medium Quality MP3 (~5-7 MB)</option>
+            <option value="audio_128k">🎵 128 kbps Standard Quality MP3 (~3-4 MB)</option>
           </optgroup>
         </select>
       </div>
 
-      <div class="form-group flex-row">
-        <label for="schedule-seconds" class="inline-label">Schedule Start (Sec)</label>
-        <input type="number" id="schedule-seconds" value="0" min="0" max="86400" placeholder="0 = Immediate">
-      </div>
-
-      <button id="download-btn" class="btn-primary">
+      <button id="download-btn" class="btn-primary btn-action">
         <span>Download Now</span>
       </button>
 
       <div id="progress-section" class="progress-section">
         <div class="progress-header">
-          <span id="progress-status">Downloading...</span>
+          <span id="progress-status" class="status-pill">EXTRACTING</span>
           <span id="progress-percent">0%</span>
         </div>
         <div class="progress-bar-bg">
@@ -92,8 +101,8 @@
     <!-- Download History View -->
     <div id="history-view" class="hidden">
       <div class="history-header">
-        <span>Recent Downloads</span>
-        <button id="clear-history-btn" class="btn-sm">Clear</button>
+        <span>Recent Downloads & Queue</span>
+        <button id="clear-history-btn" class="btn-sm">Clear History</button>
       </div>
       <div id="history-list" class="history-list">
         <div class="empty-history">No download history yet.</div>
@@ -103,12 +112,12 @@
     <!-- Settings View -->
     <div id="settings-view" class="hidden">
       <div class="form-group">
-        <label for="backend-url">Backend Server URL</label>
-        <input type="text" id="backend-url" value="http://localhost:8000" placeholder="https://your-backend.onrender.com">
+        <label for="backend-url">Cloud Control API URL</label>
+        <input type="text" id="backend-url" value="https://youtube-downloader-extension-bul7.onrender.com">
       </div>
       <div class="form-group">
-        <label for="api-key-input">Optional API Key / Access Token</label>
-        <input type="password" id="api-key-input" placeholder="Secret Key (if backend requires auth)">
+        <label for="api-key-input">Optional Agent Auth Token</label>
+        <input type="password" id="api-key-input" placeholder="Optional token">
       </div>
       <button id="save-settings-btn" class="btn-primary">
         <span>Save Settings</span>
