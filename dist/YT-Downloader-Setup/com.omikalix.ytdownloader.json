@@ -1,0 +1,9 @@
+{
+  "name": "com.omikalix.ytdownloader",
+  "description": "YT Downloader Native Agent Host",
+  "path": "downloader-agent.exe",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://pgnbdcmmbmmolimdfhhffifcbnkobifn/"
+  ]
+}

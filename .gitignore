@@ -6,7 +6,8 @@ __pycache__/
 env/
 build/
 develop-eggs/
-dist/
+# dist/
+
 downloads/
 eggs/
 .eggs/
@@ -35,5 +36,7 @@ bin/
 run.log
 native-agent/build_tmp/
 native-agent/binaries/
-*.exe
+ffmpeg.exe
+ffprobe.exe
+
 
